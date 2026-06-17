@@ -117,6 +117,10 @@ The safest concrete statement today is:
   Shorter paper-readiness notes.
 - [docs/ARTIFACT_MAP.md](/c:/Users/Admin/VSCodeProjects/Post-Hoc%20Minimal%20Patch%20Suggestion%20via%20Execution%20Intervention/docs/ARTIFACT_MAP.md:1)
   Artifact glossary and current contribution snapshot.
+- [paper/README.md](/c:/Users/Admin/VSCodeProjects/Post-Hoc%20Minimal%20Patch%20Suggestion%20via%20Execution%20Intervention/paper/README.md:1)
+  Manuscript-source map and paper build notes.
+- [paper/neurips_paper.tex](/c:/Users/Admin/VSCodeProjects/Post-Hoc%20Minimal%20Patch%20Suggestion%20via%20Execution%20Intervention/paper/neurips_paper.tex:1)
+  Submission-oriented LaTeX manuscript scaffold grounded in current artifacts.
 - `artifacts/`
   Saved failures, patch search outputs, and autopsy reports.
 - `external/tau2-bench/`

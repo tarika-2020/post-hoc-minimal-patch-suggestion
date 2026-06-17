@@ -1,0 +1,406 @@
+\documentclass[11pt]{article}
+
+% Use the official NeurIPS style if it is available locally. Fall back to a
+% simple article layout so the manuscript source remains buildable in a bare
+% environment.
+\newif\ifneuripsstyle
+\IfFileExists{neurips_2024.sty}{
+  \neuripsstyletrue
+  \usepackage[final]{neurips_2024}
+}{
+  \neuripsstylefalse
+  \usepackage[margin=1in]{geometry}
+  \usepackage[numbers]{natbib}
+  \usepackage[colorlinks=true,allcolors=blue]{hyperref}
+}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{url}
+
+\title{Minimal Execution Interventions for Post-Hoc Debugging of Tool-Using Agents}
+
+\author{Anonymous Submission}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Tool-using language agents often fail because a single intermediate action
+corrupts the downstream execution state, yet standard benchmark evaluation
+typically exposes only the final reward and a raw trajectory trace. We propose
+post-hoc minimal patch recovery, a debugging methodology that treats failed
+agent trajectories as replayable programs. Given a failed run and full
+checkpointed environment state, our method restores an intermediate snapshot,
+applies a small structured intervention, replays execution, and tests whether
+the benchmark outcome flips from failure to success. The smallest successful
+intervention serves two purposes at once: it is a repair and a causal autopsy
+of the root failure. We instantiate this framework on real tau-style agent
+environments with deterministic state, tool side effects, and benchmark
+evaluators. The current system supports multiple patch families, including tool
+argument edits, tool-call replacement, insertion, deletion, context edits, and
+bounded continuation replacement, together with explicit search-cost
+accounting. On controlled synthetic corruptions, the prototype recovers
+failures end to end and reports exact fault-localization metrics such as top-k
+accuracy and mean reciprocal rank. On imported natural failures from saved
+benchmark runs, the current prototype already demonstrates strict non-oracle
+recovery without oracle suffix reuse in both single-case and bundle settings.
+A dedicated retail identity-lookup failure is repaired via staged continuation
+from replayed state, and a clean multi-model mixed-domain bundle of $32$
+replay-failing natural cases yields $13/32$ strict recoveries under bounded
+deterministic search, with per-domain recovery $\textit{airline}=10/16$ and
+$\textit{retail}=3/16$. These results position replayable execution
+intervention as a promising methodology for agent debugging: more causal than
+prompt-only retry, more interpretable than unconstrained regeneration, and
+naturally compatible with benchmark-native evaluation.
+\end{abstract}
+
+\section{Introduction}
+
+Language agents that interact with tools, databases, websites, or code
+repositories fail for reasons that are often difficult to diagnose from final
+task reward alone. In a typical benchmark run, we observe a user goal, a
+multi-step trajectory, and a binary or scalar outcome. If the agent fails, the
+default response is usually to inspect the raw trace, retry with a stronger
+model, or ask the model to reflect and regenerate. These strategies can improve
+performance, but they are weak debugging tools: they do not cleanly isolate
+which intermediate decision actually caused failure, and they do not
+distinguish whether the real bottleneck is action selection, stale context,
+harmful state mutation, or continuation from a corrupted state.
+
+This paper argues that replayable agent environments enable a stronger form of
+post-hoc analysis. If the environment state can be checkpointed and restored,
+then a failed trajectory can be treated as a stateful program rather than a
+frozen transcript. We can pause execution at an intermediate step, edit a small
+piece of state or a single action, replay from that fork, and test whether the
+benchmark reward changes. This makes it possible to ask a causal question:
+which minimal intervention is sufficient to flip the final outcome?
+
+We study this question through post-hoc minimal patch recovery. The goal is not
+to train a new agent or to win a benchmark with a larger model. Instead, the
+goal is to turn failed trajectories into analyzable objects. A successful patch
+provides both a repair and an explanation: it identifies a concrete failure
+site, measures the cost of finding a fix, and yields an autopsy artifact that
+can be aggregated across many failures.
+
+Our current contribution is methodological rather than leaderboard-oriented. We
+introduce a benchmark-native debugging protocol that combines checkpointed
+replay, structured intervention families, bounded search, and reward-based
+evaluation. Its main outputs are success recovery rate, patch minimality,
+search cost, localization quality, and structured autopsy reports.
+
+\section{Problem Setup}
+
+We model a benchmark task as an interactive environment $E$ with an initial
+task specification $x$, an environment state $s_0$, a transition function over
+tool calls and user messages, and an evaluator $R$ that returns the benchmark
+outcome for a completed trajectory. Executing a baseline policy $\pi$ produces
+a trajectory
+\[
+\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \ldots, s_T, y),
+\]
+where $a_t$ is the agent action at step $t$, $o_t$ is the resulting tool or
+environment observation, $s_t$ is the pre-step environment state, and $y$ is
+the final task outcome.
+
+We assume a failed trajectory with $R(\tau)=0$. A patch candidate is a tuple
+\[
+p = (t, f, \delta),
+\]
+where $t$ is the target step, $f$ is a patch family, and $\delta$ is the patch
+payload. Applying $p$ means:
+\begin{enumerate}
+  \item restore the saved pre-step snapshot $s_t$;
+  \item modify the action, context, or execution state according to $\delta$;
+  \item resume execution under a specified continuation policy;
+  \item evaluate the patched rollout with the original benchmark evaluator.
+\end{enumerate}
+
+Let $\tau'(p)$ be the replayed rollout after applying patch $p$. The search
+problem is:
+\[
+\text{find } p^\star \text{ such that } R(\tau'(p^\star)) = 1
+\]
+while minimizing patch size subject to a bounded search budget. In our
+implementation, the budget can include localization cost, patch-proposal cost,
+rollout count, and model-token usage.
+
+Two continuation settings are important:
+\begin{itemize}
+  \item \textbf{Strict replay}: continue from the replayed state without using
+  oracle future actions from the benchmark trace.
+  \item \textbf{Oracle continuation}: use the benchmark reference suffix only
+  as an upper-bound analysis tool.
+\end{itemize}
+
+This distinction matters because it separates two different bottlenecks:
+localizing the faulty step and generating a good continuation after that step
+is changed.
+
+\section{Method}
+
+\subsection{Failure Collection}
+
+We construct two classes of corpora:
+\begin{itemize}
+  \item \textbf{Synthetic corruption failures}, created by perturbing
+  otherwise-valid benchmark-shaped trajectories so that the true fault step is
+  known.
+  \item \textbf{Natural imported failures}, loaded from saved tau-style result
+  files produced by an external baseline agent.
+\end{itemize}
+
+For every trajectory we store prompt context, action, tool result, pre-step
+snapshot, post-step snapshot, and final outcome metadata.
+
+\subsection{Fault Localization}
+
+Given a failed trajectory, the search ranks candidate intervention steps. The
+current system supports deterministic ranking strategies such as heuristic,
+reverse, chronological, latest-only, oracle-fault-step for synthetic analysis,
+and random candidate order. The point of localization is not only speed. It
+also enables direct measurement of root-cause accuracy on synthetic failures
+with known fault steps.
+
+\subsection{Patch Proposal}
+
+The current intervention families are:
+\begin{itemize}
+  \item \texttt{tool\_args}
+  \item \texttt{tool\_call\_replace}
+  \item \texttt{tool\_insertion}
+  \item \texttt{tool\_deletion}
+  \item \texttt{context\_edit}
+  \item \texttt{continuation\_replace}
+  \item \texttt{tool\_call\_with\_oracle\_suffix}
+\end{itemize}
+
+These patch families operate on structured execution objects rather than
+unconstrained free-form text. That keeps search interpretable and makes patch
+size measurable by family-specific criteria.
+
+\subsection{Replay and Continuation}
+
+For each candidate patch we restore the saved pre-step snapshot, apply the
+patch, execute the modified step when appropriate, and resume execution. The
+continuation policy is a critical part of the method. Some failures can be
+recovered by editing one action and replaying the original suffix. Others
+cannot, because the patched state changes later observations and invalidates
+the old suffix. The current system therefore distinguishes simple strict
+replay, staged continuation from the replayed state, and oracle suffix
+continuation as an upper bound only.
+
+\subsection{Selection and Autopsy Generation}
+
+Among successful patches, the system selects the smallest one, breaking ties by
+lower search cost. It then emits a structured autopsy containing the failure
+identifier and task metadata, the root-cause step, patch family, patch size,
+original versus patched action or state fragment, continuation mode, total
+search cost, and a short natural-language explanation.
+
+\section{Evaluation Protocol}
+
+The evaluation story has two tracks that remain separate in the manuscript.
+
+\subsection{Synthetic Evaluation}
+
+Synthetic corruptions provide known fault steps and known pre-corruption
+reference behavior. This enables exact localization accuracy, minimality
+analysis under known single-fault settings, and strategy comparisons where
+recovery and localization can diverge.
+
+\subsection{Natural Failure Evaluation}
+
+Natural failures are imported from saved benchmark result files. These runs are
+ecologically more realistic because the failures were produced by an external
+baseline agent rather than injected by our pipeline. The main natural headline
+metric is strict non-oracle recovery. Oracle continuation is reported
+separately as an upper bound and is never mixed into the main claim.
+
+\subsection{Core Metrics}
+
+The paper tracks success recovery rate, patch size, total search cost,
+success@budget, per-family recovery, per-domain recovery, localization metrics
+on synthetic failures, and the strict-versus-oracle continuation gap.
+
+\section{Preliminary Results}
+
+Table~\ref{tab:synthetic} summarizes the current controlled synthetic evidence.
+The main lesson is that recovery and localization should be measured
+separately. A strategy can recover some failures without accurately isolating
+the causal step.
+
+\begin{table}[t]
+  \centering
+  \caption{Current controlled synthetic strategy results from
+  \texttt{artifacts/synthetic\_strategy\_tables\_3/paper\_tables.json}.}
+  \label{tab:synthetic}
+  \begin{tabular}{lcccc}
+    \toprule
+    Strategy & Recovery & Top-1 Loc. & MRR & Token Cost \\
+    \midrule
+    Heuristic & $3/3$ & $1.00$ & $1.00$ & $3309$ \\
+    Latest only & $3/3$ & $1.00$ & $1.00$ & $3165$ \\
+    Chronological & $2/3$ & $0.00$ & $0.164$ & $2109$ \\
+    Random candidate & $2/3$ & $0.00$ & $0.264$ & $1961$ \\
+    No repair & $0/3$ & -- & -- & $0$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Table~\ref{tab:natural} summarizes the strongest current natural-failure
+evidence. The project is no longer only a synthetic toy story: one retail case
+is recovered by staged continuation after fixing a bad lookup step, and a clean
+multi-model mixed-domain bundle reaches $13/32$ strict recoveries. At the same
+time, the broader retail natural import still shows that naive local repair is
+insufficient on many real failures.
+
+\begin{table}[t]
+  \centering
+  \caption{Current natural-failure evidence from saved repository artifacts.}
+  \label{tab:natural}
+  \begin{tabular}{p{4.2cm}cccc}
+    \toprule
+    Setting & Recovery & Cost & Main Family & Artifact \\
+    \midrule
+    Broader retail strict replay & $0/3$ & $280$ & none &
+    \texttt{natural\_search} \\
+    Retail staged continuation & $1/1$ & $483$ &
+    \texttt{continuation\_replace} &
+    \texttt{natural\_runtime\_smoke\_search} \\
+    Mixed-domain strict bundle & $13/32$ & $2000$ &
+    \texttt{tool\_deletion} &
+    \texttt{paper\_bundle\_multimodel\_32} \\
+    Mixed-domain oracle upper bound & $13/32$ & $2000$ &
+    \texttt{tool\_deletion} &
+    \texttt{paper\_bundle\_multimodel\_32/oracle} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The mixed-domain bundle contains failures imported from runs originally produced
+by \texttt{claude-3-7-sonnet-20250219}, \texttt{gpt-4.1-2025-04-14},
+\texttt{gpt-4.1-mini-2025-04-14}, and \texttt{o4-mini-2025-04-16}. Under the
+current bounded deterministic search configuration, per-domain strict recovery
+is $10/16$ for airline and $3/16$ for retail. These results are encouraging,
+but they remain smoke-scale rather than benchmark-scale.
+
+\section{Limitations and Scope}
+
+The current project is promising but not yet at final submission scale. First,
+the natural-failure evidence is real but still modest. The repository has
+verified strict non-oracle recoveries on saved benchmark failures, including a
+clean thirty-two-case mixed-domain bundle, but not yet at the scale needed for
+a strong benchmark-wide claim.
+
+Second, continuation remains a major bottleneck. Some failures are easy to
+localize yet hard to recover because the patched action changes the future
+state distribution. This is exactly why the strict-versus-oracle gap is
+informative, but it also limits current natural recovery.
+
+Third, several intervention families exist in the interface before they are
+fully mature as high-quality proposers across domains. The paper should be
+careful to distinguish interface support from fully competitive evaluated
+methods.
+
+Fourth, autopsy usefulness has not yet been validated with human studies or a
+large expert annotation pass. At the current stage, autopsies should be treated
+as structured artifacts and qualitative evidence, not yet as fully validated
+human-facing explanations.
+
+Finally, the paper is about debugging methodology, not deployment. The current
+system operates on offline benchmark trajectories and replayable environments.
+It is not a claim about safe online automated intervention in real customer
+service systems.
+
+\section{Related Work}
+
+\subsection{Interactive Agent Benchmarks}
+
+Recent work on agent evaluation has established the importance of realistic,
+interactive benchmarks with tool use, persistent state, and goal-conditioned
+tasks. Tau-style customer-service environments, WebArena, WorkArena,
+AgentDojo, and software-oriented settings such as SWE-bench all share a core
+insight: final task success depends on multi-step interaction with an external
+environment, not just single-turn text quality
+\citep{tau_style,web_arena,work_arena,agent_dojo,swe_bench}.
+
+Our work is complementary to this benchmark line. These benchmarks tell us
+whether an agent succeeded or failed, and they often provide rich traces, but
+they do not by themselves offer a principled way to intervene on failed runs.
+We build on benchmark-style environments rather than replacing them. The key
+difference is methodological: instead of treating a failed trajectory as a dead
+artifact, we treat it as a replayable object that can be restored, patched, and
+re-evaluated under the original benchmark reward.
+
+\subsection{Reflection, Retry, and Self-Repair}
+
+A second relevant line of work studies how language models can critique and
+improve their own outputs through reflection, refinement, or search. This
+includes approaches in the spirit of Reflexion, Self-Refine, tree-search style
+deliberation, and self-debugging pipelines
+\citep{reflexion,self_refine,tree_of_thoughts,self_debugging}.
+
+Our setting is related but importantly different. Reflection-style methods
+typically operate in prompt space: they ask the model to reconsider, critique,
+or regenerate a solution. In contrast, we operate in execution space. We do
+not only ask the model to try again; we restore the exact environment state at
+a chosen step, apply a targeted structured intervention, and measure whether
+the real downstream environment reward changes. This yields a more causal notion
+of repair than prompt-only retry, while also exposing a strict-versus-oracle
+continuation gap that can be studied directly.
+
+\subsection{Fault Localization, Program Repair, and Counterfactual Explanations}
+
+Our problem is also closely related to classic ideas from fault localization,
+delta debugging, automated program repair, and minimal counterfactual
+explanations \citep{delta_debugging,program_repair,minimal_counterfactuals}.
+In those settings, one seeks a small change that either explains or repairs
+undesirable behavior. The smallest successful edit is often more informative
+than a large unconstrained rewrite.
+
+We adopt the same spirit in the agent setting, but the object being edited is
+not source code alone. It is a trajectory embedded in a live task environment
+with dialogue history, retrieved context, tool calls, and stateful side
+effects. That makes the setting harder than ordinary static repair: changing an
+action can alter later observations, invalidate the original suffix, or require
+fresh continuation planning from the replayed state.
+
+\section{Conclusion}
+
+This project supports a simple but powerful thesis: failed agent trajectories
+in replayable environments can be debugged through causal execution
+intervention rather than only through prompt-level retry. By restoring a saved
+state, applying a bounded structured patch, and re-evaluating the resulting
+rollout in the original benchmark environment, we can convert opaque failures
+into concrete autopsies with explicit recovery cost.
+
+The current repository already validates the main shape of that thesis.
+Controlled synthetic failures can be localized and repaired end to end.
+Natural saved benchmark failures are harder, but they already show the most
+important methodological pattern: some failures are irrecoverable under naive
+single-step replay, some become recoverable under staged continuation, and some
+can be recovered strictly once the intervention space includes richer repair
+operations such as action deletion.
+
+The most important next step is scale. A final paper should move from smoke
+artifacts to a frozen corpus of hundreds of natural failures across at least
+\textit{retail} and \textit{airline}, while preserving the current split
+between synthetic localization analysis and natural ecological evaluation. The
+strongest version of the paper will also strengthen strict continuation, add
+model-backed proposal ablations, replace placeholder citations with exact
+bibliographic entries, and produce camera-ready figures directly from saved
+JSON artifacts.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

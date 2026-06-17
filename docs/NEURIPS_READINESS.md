@@ -77,6 +77,9 @@ Important grounding note:
 - A clean saved bundle now exists at `artifacts/paper_bundle_multimodel_32`,
   giving a stronger mixed-domain natural evidence point than the older
   one-plus-one smoke, six-case, and sixteen-case bundles.
+- Final paper formatting is now in progress through a real LaTeX manuscript
+  scaffold at `paper/neurips_paper.tex`, with a bibliography stub and paper
+  build notes under `paper/README.md`.
 - A proposer backend abstraction is in place, with deterministic offline
   continuation and an optional OpenRouter backend.
 - Deterministic runtime continuation now supports a staged replay path:
