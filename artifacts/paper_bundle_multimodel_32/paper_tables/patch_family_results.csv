@@ -1,0 +1,5 @@
+label,patch_family,recovered_count
+strict_search,none,19
+strict_search,tool_deletion,13
+oracle_upper_bound,none,19
+oracle_upper_bound,tool_deletion,13

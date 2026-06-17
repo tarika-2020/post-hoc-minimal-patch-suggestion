@@ -1,0 +1,17 @@
+{
+  "name": "paper_batch_template",
+  "input_dir": "artifacts/corpus",
+  "output_dir": "artifacts/paper_batch",
+  "strategy": "heuristic",
+  "include_oracle_suffix": false,
+  "proposer_backend": "deterministic",
+  "model_slug": null,
+  "budget": {
+    "max_evaluations_per_failure": 4,
+    "max_candidates_per_step": 6,
+    "continuation_horizon": 3,
+    "beam_width": 2,
+    "localization_cost_per_step": 8,
+    "replay_cost_per_candidate": 1
+  }
+}

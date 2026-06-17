@@ -1,0 +1,8 @@
+label,strategy,proposer_backend,include_oracle_suffix,failure_count,recovered_count,success_recovery_rate,total_token_cost,median_token_cost,p90_token_cost,average_patch_size,success_at_k,cost_normalized_recovery,evaluated_candidate_count,continuation_horizon,beam_width
+heuristic,heuristic,deterministic,False,3,3,1.0,3309,898,1390.8,1.0,1.0,0.0009066183136899365,9,3,2
+reverse,reverse,deterministic,False,3,3,1.0,3309,898,1390.8,1.0,1.0,0.0009066183136899365,9,3,2
+chronological,chronological,deterministic,False,3,2,0.6666666666666666,2109,918,918.8,1.0,0.6666666666666666,0.000948316737790422,12,3,2
+latest_only,latest_only,deterministic,False,3,3,1.0,3165,866,1320.4,1.0,1.0,0.0009478672985781991,9,3,2
+oracle_fault_step,oracle_fault_step,deterministic,False,3,3,1.0,3309,898,1390.8,1.0,1.0,0.0009066183136899365,9,3,2
+random_candidate,random_candidate,deterministic,False,3,2,0.6666666666666666,1961,910,910.8000000000001,1.0,0.6666666666666666,0.0010198878123406426,12,3,2
+no_repair,no_repair,deterministic,False,3,0,0.0,0,0,0.0,0.0,0.0,0.0,0,3,2

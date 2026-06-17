@@ -1,0 +1,39 @@
+{
+  "strategy": "heuristic",
+  "include_oracle_suffix": false,
+  "proposer_backend": "deterministic",
+  "model_slug": null,
+  "domains": [
+    "airline",
+    "retail"
+  ],
+  "task_splits": [
+    "base"
+  ],
+  "failure_count": 32,
+  "recovered_count": 13,
+  "success_recovery_rate": 0.40625,
+  "total_token_cost": 2000,
+  "max_evaluations_per_failure": 1,
+  "max_candidates_per_step": 1,
+  "continuation_horizon": 2,
+  "beam_width": 1,
+  "evaluated_candidate_count": 30,
+  "evaluated_family_counts": {
+    "context_edit": 2,
+    "tool_call_replace": 2,
+    "tool_deletion": 26
+  },
+  "average_patch_size": 1.0,
+  "median_token_cost": 45.0,
+  "p90_token_cost": 92.20000000000002,
+  "known_fault_count": 0,
+  "known_fault_recovered_count": 0,
+  "localization_top1_accuracy": 0.0,
+  "localization_top3_accuracy": 0.0,
+  "localization_mrr": 0.0,
+  "mean_fault_rank": 0.0,
+  "median_fault_rank": 0.0,
+  "true_fault_recovery_rate": 0.0,
+  "recovered_true_fault_alignment": 0.0
+}

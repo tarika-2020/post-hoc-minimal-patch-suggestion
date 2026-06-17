@@ -1,0 +1,682 @@
+{
+  "title": "Paper Case Studies (Multi-Model 32)",
+  "input_paths": [
+    "artifacts\\natural_runtime_smoke_autopsy.json",
+    "artifacts\\paper_bundle_multimodel_32\\strict_autopsy_report.json"
+  ],
+  "source_case_count": 33,
+  "recovered_case_count": 14,
+  "selected_case_count": 6,
+  "selected_domains": [
+    "airline",
+    "retail"
+  ],
+  "selected_patch_families": [
+    "continuation_replace",
+    "tool_deletion"
+  ],
+  "selected_continuation_modes": [
+    "strict_replay"
+  ],
+  "selected_cases": [
+    {
+      "failure_id": "retail:35:natural:0:39d2c249-6e85-4db3-8f36-049be2744cf3",
+      "domain": "retail",
+      "task_split": "base",
+      "task_id": "35",
+      "original_reward": 0.0,
+      "original_failure_reason": "Natural benchmark failure with original reward 0.0.",
+      "recovered": true,
+      "total_token_cost": 483,
+      "fault_step": null,
+      "fault_description": "Natural failed trajectory imported from saved tau2 benchmark results.",
+      "known_fault_step": null,
+      "continuation_mode": "strict_replay",
+      "localization": {
+        "strategy": "chronological",
+        "ranked_steps": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "suspicious_scores": [
+          {
+            "step_index": 0,
+            "score": 4
+          },
+          {
+            "step_index": 1,
+            "score": 3
+          },
+          {
+            "step_index": 2,
+            "score": 2
+          },
+          {
+            "step_index": 3,
+            "score": 1
+          }
+        ],
+        "token_cost": 32,
+        "metadata": {}
+      },
+      "budget": {
+        "max_evaluations_per_failure": 10,
+        "max_candidates_per_step": null,
+        "continuation_horizon": 3,
+        "beam_width": 2,
+        "localization_cost_per_step": 8,
+        "replay_cost_per_candidate": 1
+      },
+      "proposer_backend": "deterministic",
+      "failure_source": "natural_tau2_result",
+      "benchmark_source_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-mini-2025-04-14_retail_base_gpt-4.1-2025-04-14_4trials.json",
+      "source_metadata": {
+        "results_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-mini-2025-04-14_retail_base_gpt-4.1-2025-04-14_4trials.json",
+        "simulation_id": "39d2c249-6e85-4db3-8f36-049be2744cf3",
+        "trial": 0,
+        "seed": 626729,
+        "termination_reason": "user_stop",
+        "original_reward": 0.0,
+        "original_reward_breakdown": {
+          "DB": 0.0,
+          "COMMUNICATE": 1.0
+        },
+        "original_agent_cost": 0.0032668000000000003,
+        "original_user_cost": 0.005619999999999999,
+        "replay_outcome": {
+          "success": false,
+          "reward": 0.0,
+          "reason": "Environment reward failed.",
+          "reward_breakdown": {
+            "RewardType.DB": 0.0
+          }
+        },
+        "tool_call_count": 4,
+        "tool_error_count": 3,
+        "tool_error_rate": 0.75,
+        "tool_errors_by_name": {
+          "find_user_id_by_email": 1,
+          "find_user_id_by_name_zip": 2
+        }
+      },
+      "root_cause_step": 0,
+      "patch_family": "continuation_replace",
+      "patch_size": 3,
+      "patch_description": "Try an alternate scenario-provided email address. Run the patched action first, then synthesize a bounded continuation from the replayed state.",
+      "original_action": {
+        "action_id": "35_natural_0",
+        "requestor": "assistant",
+        "name": "find_user_id_by_email",
+        "arguments": {
+          "email": "aarav.santos8321@example.com"
+        },
+        "info": null,
+        "compare_args": null
+      },
+      "patched_action": {
+        "action_id": "35_natural_0",
+        "requestor": "assistant",
+        "name": "find_user_id_by_email",
+        "arguments": {
+          "email": "aarav.santos8320@example.com"
+        },
+        "info": null,
+        "compare_args": null
+      },
+      "original_state_fragment": {
+        "message_history_length": 1,
+        "agent_db_keys": [
+          "orders",
+          "products",
+          "users"
+        ]
+      },
+      "patched_state_fragment": {
+        "step_deleted": false,
+        "message_history_length": 1,
+        "agent_db_keys": [
+          "orders",
+          "products",
+          "users"
+        ]
+      },
+      "winning_outcome_reason": "Environment reward succeeded.",
+      "natural_language_explanation": "The search localized the likely root cause to step 0, applied a continuation_replace intervention, and recovered benchmark reward.",
+      "summary": "Recovered retail:35:natural:0:39d2c249-6e85-4db3-8f36-049be2744cf3 by patching step 0 with continuation_replace.",
+      "artifact_source_path": "artifacts\\natural_runtime_smoke_autopsy.json",
+      "source_index": 0
+    },
+    {
+      "failure_id": "airline:48:natural:0:830f1ac4-f6d3-4d6b-95b1-f52045527e10",
+      "domain": "airline",
+      "task_split": "base",
+      "task_id": "48",
+      "original_reward": 0.0,
+      "original_failure_reason": "Natural benchmark failure with original reward 0.0.",
+      "recovered": true,
+      "total_token_cost": 13,
+      "fault_step": null,
+      "fault_description": "Natural failed trajectory imported from saved tau2 benchmark results.",
+      "known_fault_step": null,
+      "continuation_mode": "strict_replay",
+      "localization": {
+        "strategy": "heuristic",
+        "ranked_steps": [
+          0
+        ],
+        "suspicious_scores": [
+          {
+            "step_index": 0,
+            "score": 100
+          }
+        ],
+        "token_cost": 8,
+        "metadata": {}
+      },
+      "budget": {
+        "max_evaluations_per_failure": 1,
+        "max_candidates_per_step": 1,
+        "continuation_horizon": 2,
+        "beam_width": 1,
+        "localization_cost_per_step": 8,
+        "replay_cost_per_candidate": 1
+      },
+      "proposer_backend": "deterministic",
+      "failure_source": "natural_tau2_result",
+      "benchmark_source_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-2025-04-14_airline_default_gpt-4.1-2025-04-14_4trials.json",
+      "source_metadata": {
+        "results_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-2025-04-14_airline_default_gpt-4.1-2025-04-14_4trials.json",
+        "simulation_id": "830f1ac4-f6d3-4d6b-95b1-f52045527e10",
+        "trial": 0,
+        "seed": 626729,
+        "termination_reason": "user_stop",
+        "task_split": "base",
+        "original_reward": 0.0,
+        "original_reward_breakdown": {
+          "DB": 0.0,
+          "COMMUNICATE": 1.0
+        },
+        "original_agent_cost": 0.012851999999999999,
+        "original_user_cost": 0.006748,
+        "replay_outcome": {
+          "success": false,
+          "reward": 0.0,
+          "reason": "Environment reward failed.",
+          "reward_breakdown": {
+            "RewardType.DB": 0.0
+          }
+        },
+        "tool_call_count": 1,
+        "tool_error_count": 0,
+        "tool_error_rate": 0.0,
+        "tool_errors_by_name": {}
+      },
+      "root_cause_step": 0,
+      "patch_family": "tool_deletion",
+      "patch_size": 1,
+      "patch_description": "Delete the mutating tool step and replay the remaining suffix.",
+      "original_action": {
+        "action_id": "48_natural_0",
+        "requestor": "assistant",
+        "name": "cancel_reservation",
+        "arguments": {
+          "reservation_id": "3RK2T9"
+        },
+        "info": null,
+        "compare_args": null
+      },
+      "patched_action": null,
+      "original_state_fragment": {
+        "message_history_length": 1,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "patched_state_fragment": {
+        "step_deleted": true,
+        "message_history_length": 2,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "winning_outcome_reason": "Environment reward succeeded.",
+      "natural_language_explanation": "The search localized the likely root cause to step 0 and recovered benchmark reward by deleting that assistant tool call.",
+      "summary": "Recovered airline:48:natural:0:830f1ac4-f6d3-4d6b-95b1-f52045527e10 by patching step 0 with tool_deletion.",
+      "artifact_source_path": "artifacts\\paper_bundle_multimodel_32\\strict_autopsy_report.json",
+      "source_index": 13
+    },
+    {
+      "failure_id": "airline:48:natural:0:c7760ced-1f0f-48b2-b13f-28b02e218a21",
+      "domain": "airline",
+      "task_split": "base",
+      "task_id": "48",
+      "original_reward": 0.0,
+      "original_failure_reason": "Natural benchmark failure with original reward 0.0.",
+      "recovered": true,
+      "total_token_cost": 13,
+      "fault_step": null,
+      "fault_description": "Natural failed trajectory imported from saved tau2 benchmark results.",
+      "known_fault_step": null,
+      "continuation_mode": "strict_replay",
+      "localization": {
+        "strategy": "heuristic",
+        "ranked_steps": [
+          0
+        ],
+        "suspicious_scores": [
+          {
+            "step_index": 0,
+            "score": 100
+          }
+        ],
+        "token_cost": 8,
+        "metadata": {}
+      },
+      "budget": {
+        "max_evaluations_per_failure": 1,
+        "max_candidates_per_step": 1,
+        "continuation_horizon": 2,
+        "beam_width": 1,
+        "localization_cost_per_step": 8,
+        "replay_cost_per_candidate": 1
+      },
+      "proposer_backend": "deterministic",
+      "failure_source": "natural_tau2_result",
+      "benchmark_source_path": "external\\tau2-bench\\data\\tau2\\results\\final\\o4-mini-2025-04-16_airline_default_gpt-4.1-2025-04-14_4trials.json",
+      "source_metadata": {
+        "results_path": "external\\tau2-bench\\data\\tau2\\results\\final\\o4-mini-2025-04-16_airline_default_gpt-4.1-2025-04-14_4trials.json",
+        "simulation_id": "c7760ced-1f0f-48b2-b13f-28b02e218a21",
+        "trial": 0,
+        "seed": 626729,
+        "termination_reason": "user_stop",
+        "task_split": "base",
+        "original_reward": 0.0,
+        "original_reward_breakdown": {
+          "DB": 0.0,
+          "COMMUNICATE": 1.0
+        },
+        "original_agent_cost": 0.0082412,
+        "original_user_cost": 0.0057,
+        "replay_outcome": {
+          "success": false,
+          "reward": 0.0,
+          "reason": "Environment reward failed.",
+          "reward_breakdown": {
+            "RewardType.DB": 0.0
+          }
+        },
+        "tool_call_count": 1,
+        "tool_error_count": 0,
+        "tool_error_rate": 0.0,
+        "tool_errors_by_name": {}
+      },
+      "root_cause_step": 0,
+      "patch_family": "tool_deletion",
+      "patch_size": 1,
+      "patch_description": "Delete the mutating tool step and replay the remaining suffix.",
+      "original_action": {
+        "action_id": "48_natural_0",
+        "requestor": "assistant",
+        "name": "cancel_reservation",
+        "arguments": {
+          "reservation_id": "3RK2T9"
+        },
+        "info": null,
+        "compare_args": null
+      },
+      "patched_action": null,
+      "original_state_fragment": {
+        "message_history_length": 1,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "patched_state_fragment": {
+        "step_deleted": true,
+        "message_history_length": 2,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "winning_outcome_reason": "Environment reward succeeded.",
+      "natural_language_explanation": "The search localized the likely root cause to step 0 and recovered benchmark reward by deleting that assistant tool call.",
+      "summary": "Recovered airline:48:natural:0:c7760ced-1f0f-48b2-b13f-28b02e218a21 by patching step 0 with tool_deletion.",
+      "artifact_source_path": "artifacts\\paper_bundle_multimodel_32\\strict_autopsy_report.json",
+      "source_index": 29
+    },
+    {
+      "failure_id": "airline:28:natural:0:764b3beb-e513-4fe2-a7ea-249b40719bc7",
+      "domain": "airline",
+      "task_split": "base",
+      "task_id": "28",
+      "original_reward": 0.0,
+      "original_failure_reason": "Natural benchmark failure with original reward 0.0.",
+      "recovered": true,
+      "total_token_cost": 21,
+      "fault_step": null,
+      "fault_description": "Natural failed trajectory imported from saved tau2 benchmark results.",
+      "known_fault_step": null,
+      "continuation_mode": "strict_replay",
+      "localization": {
+        "strategy": "heuristic",
+        "ranked_steps": [
+          1,
+          0
+        ],
+        "suspicious_scores": [
+          {
+            "step_index": 1,
+            "score": 101
+          },
+          {
+            "step_index": 0,
+            "score": 100
+          }
+        ],
+        "token_cost": 16,
+        "metadata": {}
+      },
+      "budget": {
+        "max_evaluations_per_failure": 1,
+        "max_candidates_per_step": 1,
+        "continuation_horizon": 2,
+        "beam_width": 1,
+        "localization_cost_per_step": 8,
+        "replay_cost_per_candidate": 1
+      },
+      "proposer_backend": "deterministic",
+      "failure_source": "natural_tau2_result",
+      "benchmark_source_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-mini-2025-04-14_airline_base_gpt-4.1-2025-04-14_4trials.json",
+      "source_metadata": {
+        "results_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-mini-2025-04-14_airline_base_gpt-4.1-2025-04-14_4trials.json",
+        "simulation_id": "764b3beb-e513-4fe2-a7ea-249b40719bc7",
+        "trial": 0,
+        "seed": 626729,
+        "termination_reason": "user_stop",
+        "task_split": "base",
+        "original_reward": 0.0,
+        "original_reward_breakdown": {
+          "DB": 0.0,
+          "COMMUNICATE": 1.0
+        },
+        "original_agent_cost": 0.0034704000000000002,
+        "original_user_cost": 0.009455999999999999,
+        "replay_outcome": {
+          "success": false,
+          "reward": 0.0,
+          "reason": "Environment reward failed.",
+          "reward_breakdown": {
+            "RewardType.DB": 0.0
+          }
+        },
+        "tool_call_count": 2,
+        "tool_error_count": 0,
+        "tool_error_rate": 0.0,
+        "tool_errors_by_name": {}
+      },
+      "root_cause_step": 1,
+      "patch_family": "tool_deletion",
+      "patch_size": 1,
+      "patch_description": "Delete the mutating tool step and replay the remaining suffix.",
+      "original_action": {
+        "action_id": "28_natural_1",
+        "requestor": "assistant",
+        "name": "cancel_reservation",
+        "arguments": {
+          "reservation_id": "SI5UKW"
+        },
+        "info": null,
+        "compare_args": null
+      },
+      "patched_action": null,
+      "original_state_fragment": {
+        "message_history_length": 3,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "patched_state_fragment": {
+        "step_deleted": true,
+        "message_history_length": 4,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "winning_outcome_reason": "Environment reward succeeded.",
+      "natural_language_explanation": "The search localized the likely root cause to step 1 and recovered benchmark reward by deleting that assistant tool call.",
+      "summary": "Recovered airline:28:natural:0:764b3beb-e513-4fe2-a7ea-249b40719bc7 by patching step 1 with tool_deletion.",
+      "artifact_source_path": "artifacts\\paper_bundle_multimodel_32\\strict_autopsy_report.json",
+      "source_index": 22
+    },
+    {
+      "failure_id": "airline:47:natural:0:7b6f70f0-fda5-46a9-9cfa-60de828632f3",
+      "domain": "airline",
+      "task_split": "base",
+      "task_id": "47",
+      "original_reward": 0.0,
+      "original_failure_reason": "Natural benchmark failure with original reward 0.0.",
+      "recovered": true,
+      "total_token_cost": 21,
+      "fault_step": null,
+      "fault_description": "Natural failed trajectory imported from saved tau2 benchmark results.",
+      "known_fault_step": null,
+      "continuation_mode": "strict_replay",
+      "localization": {
+        "strategy": "heuristic",
+        "ranked_steps": [
+          1,
+          0
+        ],
+        "suspicious_scores": [
+          {
+            "step_index": 1,
+            "score": 101
+          },
+          {
+            "step_index": 0,
+            "score": 100
+          }
+        ],
+        "token_cost": 16,
+        "metadata": {}
+      },
+      "budget": {
+        "max_evaluations_per_failure": 1,
+        "max_candidates_per_step": 1,
+        "continuation_horizon": 2,
+        "beam_width": 1,
+        "localization_cost_per_step": 8,
+        "replay_cost_per_candidate": 1
+      },
+      "proposer_backend": "deterministic",
+      "failure_source": "natural_tau2_result",
+      "benchmark_source_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-2025-04-14_airline_default_gpt-4.1-2025-04-14_4trials.json",
+      "source_metadata": {
+        "results_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-2025-04-14_airline_default_gpt-4.1-2025-04-14_4trials.json",
+        "simulation_id": "7b6f70f0-fda5-46a9-9cfa-60de828632f3",
+        "trial": 0,
+        "seed": 626729,
+        "termination_reason": "user_stop",
+        "task_split": "base",
+        "original_reward": 0.0,
+        "original_reward_breakdown": {
+          "DB": 0.0,
+          "COMMUNICATE": 1.0
+        },
+        "original_agent_cost": 0.014367999999999999,
+        "original_user_cost": 0.005639999999999999,
+        "replay_outcome": {
+          "success": false,
+          "reward": 0.0,
+          "reason": "Environment reward failed.",
+          "reward_breakdown": {
+            "RewardType.DB": 0.0
+          }
+        },
+        "tool_call_count": 2,
+        "tool_error_count": 0,
+        "tool_error_rate": 0.0,
+        "tool_errors_by_name": {}
+      },
+      "root_cause_step": 1,
+      "patch_family": "tool_deletion",
+      "patch_size": 1,
+      "patch_description": "Delete the mutating tool step and replay the remaining suffix.",
+      "original_action": {
+        "action_id": "47_natural_1",
+        "requestor": "assistant",
+        "name": "cancel_reservation",
+        "arguments": {
+          "reservation_id": "H8Q05L"
+        },
+        "info": null,
+        "compare_args": null
+      },
+      "patched_action": null,
+      "original_state_fragment": {
+        "message_history_length": 3,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "patched_state_fragment": {
+        "step_deleted": true,
+        "message_history_length": 4,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "winning_outcome_reason": "Environment reward succeeded.",
+      "natural_language_explanation": "The search localized the likely root cause to step 1 and recovered benchmark reward by deleting that assistant tool call.",
+      "summary": "Recovered airline:47:natural:0:7b6f70f0-fda5-46a9-9cfa-60de828632f3 by patching step 1 with tool_deletion.",
+      "artifact_source_path": "artifacts\\paper_bundle_multimodel_32\\strict_autopsy_report.json",
+      "source_index": 12
+    },
+    {
+      "failure_id": "airline:47:natural:0:ac4ce417-4b30-4470-91db-6605b6df8759",
+      "domain": "airline",
+      "task_split": "base",
+      "task_id": "47",
+      "original_reward": 0.0,
+      "original_failure_reason": "Natural benchmark failure with original reward 0.0.",
+      "recovered": true,
+      "total_token_cost": 21,
+      "fault_step": null,
+      "fault_description": "Natural failed trajectory imported from saved tau2 benchmark results.",
+      "known_fault_step": null,
+      "continuation_mode": "strict_replay",
+      "localization": {
+        "strategy": "heuristic",
+        "ranked_steps": [
+          1,
+          0
+        ],
+        "suspicious_scores": [
+          {
+            "step_index": 1,
+            "score": 101
+          },
+          {
+            "step_index": 0,
+            "score": 100
+          }
+        ],
+        "token_cost": 16,
+        "metadata": {}
+      },
+      "budget": {
+        "max_evaluations_per_failure": 1,
+        "max_candidates_per_step": 1,
+        "continuation_horizon": 2,
+        "beam_width": 1,
+        "localization_cost_per_step": 8,
+        "replay_cost_per_candidate": 1
+      },
+      "proposer_backend": "deterministic",
+      "failure_source": "natural_tau2_result",
+      "benchmark_source_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-mini-2025-04-14_airline_base_gpt-4.1-2025-04-14_4trials.json",
+      "source_metadata": {
+        "results_path": "external\\tau2-bench\\data\\tau2\\results\\final\\gpt-4.1-mini-2025-04-14_airline_base_gpt-4.1-2025-04-14_4trials.json",
+        "simulation_id": "ac4ce417-4b30-4470-91db-6605b6df8759",
+        "trial": 0,
+        "seed": 626729,
+        "termination_reason": "user_stop",
+        "task_split": "base",
+        "original_reward": 0.0,
+        "original_reward_breakdown": {
+          "DB": 0.0,
+          "COMMUNICATE": 1.0
+        },
+        "original_agent_cost": 0.0027043999999999996,
+        "original_user_cost": 0.005422,
+        "replay_outcome": {
+          "success": false,
+          "reward": 0.0,
+          "reason": "Environment reward failed.",
+          "reward_breakdown": {
+            "RewardType.DB": 0.0
+          }
+        },
+        "tool_call_count": 2,
+        "tool_error_count": 0,
+        "tool_error_rate": 0.0,
+        "tool_errors_by_name": {}
+      },
+      "root_cause_step": 1,
+      "patch_family": "tool_deletion",
+      "patch_size": 1,
+      "patch_description": "Delete the mutating tool step and replay the remaining suffix.",
+      "original_action": {
+        "action_id": "47_natural_1",
+        "requestor": "assistant",
+        "name": "cancel_reservation",
+        "arguments": {
+          "reservation_id": "H8Q05L"
+        },
+        "info": null,
+        "compare_args": null
+      },
+      "patched_action": null,
+      "original_state_fragment": {
+        "message_history_length": 3,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "patched_state_fragment": {
+        "step_deleted": true,
+        "message_history_length": 4,
+        "agent_db_keys": [
+          "flights",
+          "reservations",
+          "users"
+        ]
+      },
+      "winning_outcome_reason": "Environment reward succeeded.",
+      "natural_language_explanation": "The search localized the likely root cause to step 1 and recovered benchmark reward by deleting that assistant tool call.",
+      "summary": "Recovered airline:47:natural:0:ac4ce417-4b30-4470-91db-6605b6df8759 by patching step 1 with tool_deletion.",
+      "artifact_source_path": "artifacts\\paper_bundle_multimodel_32\\strict_autopsy_report.json",
+      "source_index": 21
+    }
+  ]
+}

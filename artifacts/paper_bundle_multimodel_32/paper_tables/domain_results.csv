@@ -1,0 +1,5 @@
+label,domain,case_count,recovered_count,success_recovery_rate
+strict_search,airline,16,10,0.625
+strict_search,retail,16,3,0.1875
+oracle_upper_bound,airline,16,10,0.625
+oracle_upper_bound,retail,16,3,0.1875

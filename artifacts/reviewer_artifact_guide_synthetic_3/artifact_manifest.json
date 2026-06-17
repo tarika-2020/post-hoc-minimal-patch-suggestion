@@ -1,0 +1,142 @@
+{
+  "title": "Reviewer Artifact Guide (Synthetic 3)",
+  "entry_count": 6,
+  "input_dirs": [
+    "artifacts\\synthetic_strategy_tables_3",
+    "artifacts\\synthetic_strategy_figures_3",
+    "artifacts\\synthetic_strategy_comparison_3\\latest_only",
+    "artifacts\\synthetic_strategy_comparison_3\\chronological",
+    "artifacts\\synthetic_strategy_comparison_3\\random_candidate",
+    "artifacts\\synthetic_strategy_comparison_3\\no_repair"
+  ],
+  "paper_draft_path": "paper\\paper_draft.md",
+  "checklist_path": "paper\\submission_checklist.md",
+  "environment": {
+    "python_version": "3.13.11",
+    "python_executable": "C:\\Users\\Admin\\miniconda3\\python.exe",
+    "platform": "Windows-11-10.0.26100-SP0",
+    "cwd": "C:\\Users\\Admin\\VSCodeProjects\\Post-Hoc Minimal Patch Suggestion via Execution Intervention",
+    "selected_distributions": {
+      "tau2": "1.0.0",
+      "litellm": "1.82.6",
+      "openai": "2.26.0",
+      "pydantic": "2.12.4",
+      "httpx": "0.28.1"
+    }
+  },
+  "artifacts": [
+    {
+      "label": "synthetic_strategy_tables_3",
+      "path": "artifacts\\synthetic_strategy_tables_3",
+      "available_files": [
+        "paper_tables.json",
+        "paper_tables.md"
+      ],
+      "artifact_type": "paper_tables",
+      "experiment_count": 7,
+      "main_result_count": 7,
+      "domain_result_count": 7,
+      "patch_family_result_count": 9,
+      "synthetic_localization_result_count": 7
+    },
+    {
+      "label": "synthetic_strategy_figures_3",
+      "path": "artifacts\\synthetic_strategy_figures_3",
+      "available_files": [
+        "figure_data.csv",
+        "figure_report.md"
+      ],
+      "artifact_type": "figure_data",
+      "has_csv": true,
+      "has_markdown_report": true
+    },
+    {
+      "label": "latest_only",
+      "path": "artifacts\\synthetic_strategy_comparison_3\\latest_only",
+      "available_files": [
+        "patch_summary.json",
+        "patch_results.json"
+      ],
+      "artifact_type": "patch_run",
+      "strategy": "latest_only",
+      "proposer_backend": "deterministic",
+      "model_slug": null,
+      "include_oracle_suffix": false,
+      "failure_count": 3,
+      "recovered_count": 3,
+      "success_recovery_rate": 1.0,
+      "total_token_cost": 3165,
+      "evaluated_candidate_count": 9,
+      "average_patch_size": 1.0,
+      "known_fault_count": 3,
+      "localization_top1_accuracy": 1.0,
+      "localization_mrr": 1.0
+    },
+    {
+      "label": "chronological",
+      "path": "artifacts\\synthetic_strategy_comparison_3\\chronological",
+      "available_files": [
+        "patch_summary.json",
+        "patch_results.json"
+      ],
+      "artifact_type": "patch_run",
+      "strategy": "chronological",
+      "proposer_backend": "deterministic",
+      "model_slug": null,
+      "include_oracle_suffix": false,
+      "failure_count": 3,
+      "recovered_count": 2,
+      "success_recovery_rate": 0.6666666666666666,
+      "total_token_cost": 2109,
+      "evaluated_candidate_count": 12,
+      "average_patch_size": 1.0,
+      "known_fault_count": 3,
+      "localization_top1_accuracy": 0.0,
+      "localization_mrr": 0.16363636363636366
+    },
+    {
+      "label": "random_candidate",
+      "path": "artifacts\\synthetic_strategy_comparison_3\\random_candidate",
+      "available_files": [
+        "patch_summary.json",
+        "patch_results.json"
+      ],
+      "artifact_type": "patch_run",
+      "strategy": "random_candidate",
+      "proposer_backend": "deterministic",
+      "model_slug": null,
+      "include_oracle_suffix": false,
+      "failure_count": 3,
+      "recovered_count": 2,
+      "success_recovery_rate": 0.6666666666666666,
+      "total_token_cost": 1961,
+      "evaluated_candidate_count": 12,
+      "average_patch_size": 1.0,
+      "known_fault_count": 3,
+      "localization_top1_accuracy": 0.0,
+      "localization_mrr": 0.2638888888888889
+    },
+    {
+      "label": "no_repair",
+      "path": "artifacts\\synthetic_strategy_comparison_3\\no_repair",
+      "available_files": [
+        "patch_summary.json",
+        "patch_results.json"
+      ],
+      "artifact_type": "patch_run",
+      "strategy": "no_repair",
+      "proposer_backend": "deterministic",
+      "model_slug": null,
+      "include_oracle_suffix": false,
+      "failure_count": 3,
+      "recovered_count": 0,
+      "success_recovery_rate": 0.0,
+      "total_token_cost": 0,
+      "evaluated_candidate_count": 0,
+      "average_patch_size": 0.0,
+      "known_fault_count": 3,
+      "localization_top1_accuracy": 0.0,
+      "localization_mrr": 0.5
+    }
+  ]
+}

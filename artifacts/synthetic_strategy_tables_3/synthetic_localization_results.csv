@@ -1,0 +1,8 @@
+label,strategy,known_fault_count,known_fault_recovered_count,localization_top1_accuracy,localization_top3_accuracy,localization_mrr,mean_fault_rank,median_fault_rank,true_fault_recovery_rate,recovered_true_fault_alignment
+heuristic,heuristic,3,3,1.0,1.0,1.0,1.0,1,1.0,1.0
+reverse,reverse,3,3,1.0,1.0,1.0,1.0,1,1.0,1.0
+chronological,chronological,3,2,0.0,0.0,0.16363636363636366,7.0,5,0.6666666666666666,1.0
+latest_only,latest_only,3,3,1.0,1.0,1.0,1.0,1,1.0,1.0
+oracle_fault_step,oracle_fault_step,3,3,1.0,1.0,1.0,1.0,1,1.0,1.0
+random_candidate,random_candidate,3,2,0.0,0.6666666666666666,0.2638888888888889,4.666666666666667,3,0.6666666666666666,1.0
+no_repair,no_repair,3,0,0.0,1.0,0.5,2.0,2,0.0,0.0

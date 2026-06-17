@@ -1,0 +1,8 @@
+label,domain,case_count,recovered_count,success_recovery_rate
+heuristic,retail,3,3,1.0
+reverse,retail,3,3,1.0
+chronological,retail,3,2,0.6666666666666666
+latest_only,retail,3,3,1.0
+oracle_fault_step,retail,3,3,1.0
+random_candidate,retail,3,2,0.6666666666666666
+no_repair,retail,3,0,0.0

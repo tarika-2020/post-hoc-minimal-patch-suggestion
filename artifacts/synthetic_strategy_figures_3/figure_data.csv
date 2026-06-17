@@ -1,0 +1,8 @@
+label,success_recovery_rate,total_token_cost,average_patch_size,known_fault_count,localization_top1_accuracy,localization_mrr,true_fault_recovery_rate
+heuristic,1.0,3309,1.0,3,1.0,1.0,1.0
+reverse,1.0,3309,1.0,3,1.0,1.0,1.0
+chronological,0.6666666666666666,2109,1.0,3,0.0,0.16363636363636366,0.6666666666666666
+latest_only,1.0,3165,1.0,3,1.0,1.0,1.0
+oracle_fault_step,1.0,3309,1.0,3,1.0,1.0,1.0
+random_candidate,0.6666666666666666,1961,1.0,3,0.0,0.2638888888888889,0.6666666666666666
+no_repair,0.0,0,0.0,3,0.0,0.5,0.0

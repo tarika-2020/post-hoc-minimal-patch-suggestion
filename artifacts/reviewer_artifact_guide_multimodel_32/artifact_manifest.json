@@ -1,0 +1,73 @@
+{
+  "title": "Reviewer Artifact Guide (Multi-Model 32)",
+  "entry_count": 3,
+  "input_dirs": [
+    "artifacts\\paper_bundle_multimodel_32",
+    "artifacts\\paper_bundle_multimodel_32\\paper_tables",
+    "artifacts\\paper_case_studies_multimodel_32"
+  ],
+  "paper_draft_path": "paper\\paper_draft.md",
+  "checklist_path": "paper\\submission_checklist.md",
+  "environment": {
+    "python_version": "3.13.11",
+    "python_executable": "C:\\Users\\Admin\\miniconda3\\python.exe",
+    "platform": "Windows-11-10.0.26100-SP0",
+    "cwd": "C:\\Users\\Admin\\VSCodeProjects\\Post-Hoc Minimal Patch Suggestion via Execution Intervention",
+    "selected_distributions": {
+      "tau2": "1.0.0",
+      "litellm": "1.82.6",
+      "openai": "2.26.0",
+      "pydantic": "2.12.4",
+      "httpx": "0.28.1"
+    }
+  },
+  "artifacts": [
+    {
+      "label": "paper_bundle_multimodel_32",
+      "path": "artifacts\\paper_bundle_multimodel_32",
+      "available_files": [
+        "paper_bundle_summary.json",
+        "strict_autopsy_report.json",
+        "oracle_autopsy_report.json"
+      ],
+      "artifact_type": "paper_bundle",
+      "domains": [
+        "airline",
+        "retail"
+      ],
+      "entry_count": 32,
+      "strict_success_recovery_rate": 0.40625,
+      "oracle_success_recovery_rate": 0.40625,
+      "strict_recovered_count": 13,
+      "oracle_recovered_count": 13,
+      "figure_count": 2,
+      "table_experiment_count": 2
+    },
+    {
+      "label": "paper_tables",
+      "path": "artifacts\\paper_bundle_multimodel_32\\paper_tables",
+      "available_files": [
+        "paper_tables.json",
+        "paper_tables.md"
+      ],
+      "artifact_type": "paper_tables",
+      "experiment_count": 2,
+      "main_result_count": 2,
+      "domain_result_count": 4,
+      "patch_family_result_count": 4,
+      "synthetic_localization_result_count": 0
+    },
+    {
+      "label": "paper_case_studies_multimodel_32",
+      "path": "artifacts\\paper_case_studies_multimodel_32",
+      "available_files": [
+        "case_studies.json",
+        "case_studies.md"
+      ],
+      "artifact_type": "case_studies",
+      "selected_case_count": 6,
+      "recovered_case_count": 14,
+      "source_count": 2
+    }
+  ]
+}

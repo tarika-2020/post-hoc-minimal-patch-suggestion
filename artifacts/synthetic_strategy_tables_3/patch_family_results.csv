@@ -1,0 +1,10 @@
+label,patch_family,recovered_count
+heuristic,tool_args,3
+reverse,tool_args,3
+chronological,none,1
+chronological,tool_args,2
+latest_only,tool_args,3
+oracle_fault_step,tool_args,3
+random_candidate,none,1
+random_candidate,tool_args,2
+no_repair,none,3

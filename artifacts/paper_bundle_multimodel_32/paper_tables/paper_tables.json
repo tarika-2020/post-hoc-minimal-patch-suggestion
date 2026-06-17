@@ -1,0 +1,94 @@
+{
+  "experiment_count": 2,
+  "main_results": [
+    {
+      "label": "strict_search",
+      "strategy": "heuristic",
+      "proposer_backend": "deterministic",
+      "include_oracle_suffix": false,
+      "failure_count": 32,
+      "recovered_count": 13,
+      "success_recovery_rate": 0.40625,
+      "total_token_cost": 2000,
+      "median_token_cost": 45.0,
+      "p90_token_cost": 92.20000000000002,
+      "average_patch_size": 1.0,
+      "success_at_k": 0.40625,
+      "cost_normalized_recovery": 0.0065,
+      "evaluated_candidate_count": 30,
+      "continuation_horizon": 2,
+      "beam_width": 1
+    },
+    {
+      "label": "oracle_upper_bound",
+      "strategy": "heuristic",
+      "proposer_backend": "deterministic",
+      "include_oracle_suffix": true,
+      "failure_count": 32,
+      "recovered_count": 13,
+      "success_recovery_rate": 0.40625,
+      "total_token_cost": 2000,
+      "median_token_cost": 45.0,
+      "p90_token_cost": 92.20000000000002,
+      "average_patch_size": 1.0,
+      "success_at_k": 0.40625,
+      "cost_normalized_recovery": 0.0065,
+      "evaluated_candidate_count": 30,
+      "continuation_horizon": 2,
+      "beam_width": 1
+    }
+  ],
+  "patch_family_results": [
+    {
+      "label": "strict_search",
+      "patch_family": "none",
+      "recovered_count": 19
+    },
+    {
+      "label": "strict_search",
+      "patch_family": "tool_deletion",
+      "recovered_count": 13
+    },
+    {
+      "label": "oracle_upper_bound",
+      "patch_family": "none",
+      "recovered_count": 19
+    },
+    {
+      "label": "oracle_upper_bound",
+      "patch_family": "tool_deletion",
+      "recovered_count": 13
+    }
+  ],
+  "domain_results": [
+    {
+      "label": "strict_search",
+      "domain": "airline",
+      "case_count": 16,
+      "recovered_count": 10,
+      "success_recovery_rate": 0.625
+    },
+    {
+      "label": "strict_search",
+      "domain": "retail",
+      "case_count": 16,
+      "recovered_count": 3,
+      "success_recovery_rate": 0.1875
+    },
+    {
+      "label": "oracle_upper_bound",
+      "domain": "airline",
+      "case_count": 16,
+      "recovered_count": 10,
+      "success_recovery_rate": 0.625
+    },
+    {
+      "label": "oracle_upper_bound",
+      "domain": "retail",
+      "case_count": 16,
+      "recovered_count": 3,
+      "success_recovery_rate": 0.1875
+    }
+  ],
+  "synthetic_localization_results": []
+}

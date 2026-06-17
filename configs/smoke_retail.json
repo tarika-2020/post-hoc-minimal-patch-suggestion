@@ -1,0 +1,24 @@
+{
+  "name": "smoke_retail",
+  "domain": "retail",
+  "task_split": "base",
+  "synthetic_limit": 1,
+  "natural_limit": 1,
+  "max_evaluations_per_failure": 3,
+  "strategies": [
+    "heuristic",
+    "reverse",
+    "chronological",
+    "latest_only",
+    "oracle_fault_step"
+  ],
+  "natural_results_path": "external/tau2-bench/data/tau2/results/final/gpt-4.1-mini-2025-04-14_retail_base_gpt-4.1-2025-04-14_4trials.json",
+  "artifacts": {
+    "synthetic_collect": "artifacts/collect",
+    "synthetic_search": "artifacts/search",
+    "synthetic_strategy_comparison": "artifacts/strategy_comparison",
+    "natural_collect": "artifacts/natural_collect",
+    "natural_strategy_comparison": "artifacts/natural_strategy_comparison",
+    "autopsy_report": "artifacts/autopsy_report.json"
+  }
+}
