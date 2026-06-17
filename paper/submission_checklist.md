@@ -14,7 +14,7 @@ artifacts, and commands already present in the repository.
 
 | Item | Status | Evidence / Path | Remaining Work |
 | --- | --- | --- | --- |
-| Workshop manuscript scaffold | `done` | [workshop_paper.tex](./workshop_paper.tex), [README.md](./README.md) | Replace the current early-evidence wording with frozen workshop counts after the final run |
+| Workshop manuscript scaffold | `done` | [workshop_paper.tex](./workshop_paper.tex), [README.md](./README.md) | Swap in final artifact-backed result numbers once the release runner finishes |
 | Abstract | `done` | [paper_draft.md](./paper_draft.md) | Tighten wording after full experiments |
 | Introduction | `done` | [paper_draft.md](./paper_draft.md), [neurips_paper.tex](./neurips_paper.tex) | Final motivation polish after full experiments |
 | Problem setup | `done` | [paper_draft.md](./paper_draft.md) | Convert informal notation into final paper notation |
@@ -23,7 +23,7 @@ artifacts, and commands already present in the repository.
 | Preliminary experiments/results | `done` | [paper_draft.md](./paper_draft.md) | Replace smoke framing with full main results once larger runs finish |
 | Limitations | `done` | [paper_draft.md](./paper_draft.md) | Update after final experiments |
 | Conclusion/future work | `done` | [paper_draft.md](./paper_draft.md) | Minor revision after final tables |
-| Final paper formatting | `in_progress` | [neurips_paper.tex](./neurips_paper.tex), [references.bib](./references.bib), [README.md](./README.md) | Compile with official NeurIPS style and swap smoke tables for final large-run tables/figures |
+| Final paper formatting | `in_progress` | [neurips_paper.tex](./neurips_paper.tex), [references.bib](./references.bib), [README.md](./README.md) | Compile with official NeurIPS style and swap smoke tables for final large-run tables/figures; `pdflatex` is not installed in the current local environment |
 
 ## Core Method Evidence
 
@@ -38,6 +38,9 @@ artifacts, and commands already present in the repository.
 | Strict non-oracle natural recovery | `in_progress` | [artifacts/natural_runtime_smoke_autopsy.json](../artifacts/natural_runtime_smoke_autopsy.json), [artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json](../artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json), [artifacts/paper_bundle_multimodel_32/strict_autopsy_report.json](../artifacts/paper_bundle_multimodel_32/strict_autopsy_report.json) | Demonstrate on a much larger natural corpus |
 | Oracle continuation upper bound | `done` | [artifacts/natural_oracle_suffix_search/patch_summary.json](../artifacts/natural_oracle_suffix_search/patch_summary.json) | Keep explicitly separate from main claim |
 | Synthetic localization metrics | `done` | [artifacts/synthetic_strategy_tables_3/synthetic_localization_results.csv](../artifacts/synthetic_strategy_tables_3/synthetic_localization_results.csv) | Scale beyond the current three-case controlled corpus |
+| Frozen workshop natural corpus (`80`) | `done` | [corpus_manifest.json](../artifacts/workshop_bundle_release/natural_corpus/corpus_manifest.json) | Finish downstream search/report generation |
+| Frozen workshop synthetic corpus (`24`) | `done` | [summary.json](../artifacts/workshop_bundle_release/synthetic_corpus/summary.json) | Finish downstream comparison/report generation |
+| Secret hygiene for hosted runs | `in_progress` | [submission_checklist.md](./submission_checklist.md) | Keep `OPENROUTER_API_KEY` out of tracked files and load it only from the environment |
 
 ## Main Experimental Claims Needed For Submission
 
@@ -54,7 +57,7 @@ artifacts, and commands already present in the repository.
 
 | Artifact | Status | Current Evidence / Path | Remaining Work |
 | --- | --- | --- | --- |
-| Workshop short-paper tables and figure CSVs | `in_progress` | CLI exists in [main.py](../main.py), workshop manuscript source in [workshop_paper.tex](./workshop_paper.tex) | Run the frozen workshop bundle and point the short paper at those saved outputs |
+| Workshop short-paper tables and figure CSVs | `in_progress` | Frozen corpora in [artifacts/workshop_bundle_release](../artifacts/workshop_bundle_release), resume runner in [scripts/resume_workshop_release.py](../scripts/resume_workshop_release.py) | Let the release runner finish and point the short paper at the saved outputs |
 | Synthetic localization table | `done` | [synthetic_localization_results.csv](../artifacts/synthetic_strategy_tables_3/synthetic_localization_results.csv) | Scale to larger synthetic corpus |
 | Main smoke result tables | `done` | [paper_tables.md](../artifacts/synthetic_strategy_tables_3/paper_tables.md), [paper_tables.md](../artifacts/paper_bundle_smoke_cli/paper_tables/paper_tables.md) | Produce final paper tables from full runs |
 | Figure-ready CSV data | `done` | [figure_data.csv](../artifacts/synthetic_strategy_figures_3/figure_data.csv) | Turn into camera-ready plots |
@@ -67,7 +70,8 @@ artifacts, and commands already present in the repository.
 
 | Item | Status | Evidence / Path | Remaining Work |
 | --- | --- | --- | --- |
-| Workshop bundle CLI path | `done` | [main.py](../main.py), [workshop_paper.tex](./workshop_paper.tex) | Freeze the workshop corpora and save the first release bundle |
+| Workshop bundle CLI path | `done` | [main.py](../main.py), [workshop_paper.tex](./workshop_paper.tex) | None beyond final artifact completion |
+| Workshop release resume path | `done` | [resume_workshop_release.py](../scripts/resume_workshop_release.py) | Monitor the long-running bundle and refresh docs once outputs land |
 | One-command smoke bundle | `done` | [paper_bundle_summary.json](../artifacts/paper_bundle_smoke_cli/paper_bundle_summary.json) | Keep stable while scaling |
 | Saved paper-facing tables | `done` | [artifacts/paper_bundle_smoke_cli/paper_tables/paper_tables.json](../artifacts/paper_bundle_smoke_cli/paper_tables/paper_tables.json) | Produce full-run versions |
 | Saved autopsy reports | `done` | [artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json](../artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json) | Curate final examples |
@@ -77,14 +81,12 @@ artifacts, and commands already present in the repository.
 ## High-Priority Next Actions
 
 1. Freeze the workshop corpora for `retail + airline` and run `make-workshop-bundle`.
-2. Run the new simple retry baselines under matched budgets and save their outputs.
-3. Scale the current clean thirty-two-case mixed-domain corpus into a materially larger frozen `retail + airline` corpus.
-4. Run strict non-oracle search on that larger corpus with saved JSON outputs.
-5. Run oracle upper-bound search on the same larger corpus to measure the continuation gap.
-6. Scale the synthetic localization suite beyond the current three controlled failures and preferably beyond one domain.
-7. Export final paper tables and figure CSVs from those runs.
-8. Curate 3-5 autopsy case studies for the paper.
-9. Compile the LaTeX manuscript with the official NeurIPS style and convert the smoke tables/figures into final large-run tables/figures.
+2. Finish strict non-oracle search, oracle upper bound, synthetic strategy comparison, and budget sweep under [artifacts/workshop_bundle_release](../artifacts/workshop_bundle_release).
+3. Run the hosted retry baselines safely:
+   use `OPENROUTER_API_KEY` from the environment only, and keep free-model runs within the documented OpenRouter daily cap unless credits are added.
+4. Export final workshop tables and figure CSVs from those saved runs.
+5. Curate 3 workshop case studies and update the short paper with the saved artifact numbers.
+6. Compile the LaTeX manuscript with the official workshop style once the template file is available locally.
 
 ## Canonical Current Artifacts
 

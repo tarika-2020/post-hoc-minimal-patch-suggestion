@@ -48,10 +48,12 @@ metrics in addition to recovery. On imported natural failures, the current
 artifact-backed evidence already includes strict non-oracle recoveries in both
 retail and airline settings, including continuation-based recovery after an
 identity-lookup repair and deletion-based recovery for harmful mutating
-actions. These results motivate replayable execution intervention as a practical
-debugging protocol for LLM agents: more causal than prompt-only retry, more
-interpretable than unconstrained regeneration, and naturally aligned with
-benchmark evaluation.
+actions. The frozen workshop corpus now contains $80$ replay-failing natural
+cases and $24$ controlled synthetic failures across retail and airline. These
+results motivate replayable execution intervention as a practical debugging
+protocol for LLM agents: more causal than prompt-only retry, more interpretable
+than unconstrained regeneration, and naturally aligned with benchmark
+evaluation.
 \end{abstract}
 
 \section{Introduction}
@@ -73,7 +75,7 @@ benchmark outcome.
 This workshop paper is methodology-first. We do not claim benchmark-wide repair
 at this stage. Instead, we contribute a concrete protocol built around
 checkpointed replay, structured patch families, bounded search cost, and
-autopsy generation, together with early real-environment evidence on saved
+autopsy generation, together with a now-frozen workshop corpus over saved
 tau-style failures in retail and airline domains.
 
 \section{Method}
@@ -105,18 +107,20 @@ The workshop implementation also includes three simple rerun baselines:
 
 \section{Workshop Evaluation Scope}
 
-The workshop path stays tau-native and focuses on retail plus airline. The main
-headline setting is strict non-oracle replay: after patching a saved failure,
-the system must continue from the replayed state without reusing oracle future
-actions. Oracle continuation is retained only as an upper-bound analysis.
+The workshop path stays tau-native and focuses on retail plus airline. The
+frozen corpus currently contains $40$ retail plus $40$ airline natural
+failures, together with $12$ retail plus $12$ airline synthetic failures. The
+main headline setting is strict non-oracle replay: after patching a saved
+failure, the system must continue from the replayed state without reusing
+oracle future actions. Oracle continuation is retained only as an upper-bound
+analysis.
 
 The codebase now supports the full workshop artifact path: building natural and
 synthetic corpora, running structured patch search, running retry baselines,
 exporting tables and figure CSVs, and generating reviewer-facing artifact
-bundles. The current repository evidence is still moderate scale rather than a
-fully frozen workshop corpus, so the manuscript should present the current
-numbers as early real-environment evidence and reserve larger frozen counts for
-the submission run.
+bundles. In the current repo state, the corpus freeze is complete while the
+final downstream result bundle is still being regenerated from those frozen
+artifacts.
 
 \section{Related Work}
 
@@ -154,6 +158,8 @@ practical.
 What is already true in the repository:
 \begin{itemize}
   \item real tau-native replay exists for retail and airline;
+  \item the workshop corpora are frozen at $80$ natural and $24$ synthetic
+  cases;
   \item saved natural failures are imported only if they remain failures under
   exact replay;
   \item strict non-oracle natural recovery is no longer only synthetic, with
@@ -164,7 +170,9 @@ What is already true in the repository:
 
 What still separates the workshop version from a full conference paper:
 \begin{itemize}
-  \item a larger frozen natural corpus,
+  \item completed final workshop result tables and figures from the frozen
+  corpora,
+  \item hosted retry baselines at a scale beyond free-tier request caps,
   \item stronger non-oracle continuation at scale,
   \item broader baseline coverage,
   \item human evaluation of autopsy usefulness.
@@ -176,9 +184,10 @@ The current system is still limited by continuation quality, patch-family
 coverage, and experiment scale. Some failures are easy to localize but hard to
 repair without a stronger continuation proposer. Others likely require context
 editing or multi-step intervention beyond the current one-step framework. The
-next milestone is to freeze the workshop corpora, run the new retry baselines
-under matched budgets, and finalize the short paper with saved tables and case
-studies generated directly from artifact directories.
+next milestone is to finish the release bundle over the already-frozen corpora,
+populate the short paper with the saved tables and case studies, and rerun the
+hosted retry baselines from an environment-provided API key rather than any
+tracked project document.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
