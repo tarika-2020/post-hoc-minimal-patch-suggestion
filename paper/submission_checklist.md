@@ -14,15 +14,16 @@ artifacts, and commands already present in the repository.
 
 | Item | Status | Evidence / Path | Remaining Work |
 | --- | --- | --- | --- |
+| Workshop manuscript scaffold | `done` | [workshop_paper.tex](./workshop_paper.tex), [README.md](./README.md) | Replace the current early-evidence wording with frozen workshop counts after the final run |
 | Abstract | `done` | [paper_draft.md](./paper_draft.md) | Tighten wording after full experiments |
-| Introduction | `done` | [paper_draft.md](./paper_draft.md) | Add citations and final motivation polish |
+| Introduction | `done` | [paper_draft.md](./paper_draft.md), [neurips_paper.tex](./neurips_paper.tex) | Final motivation polish after full experiments |
 | Problem setup | `done` | [paper_draft.md](./paper_draft.md) | Convert informal notation into final paper notation |
 | Method | `done` | [paper_draft.md](./paper_draft.md) | Add algorithm box / pseudocode |
-| Related work | `done` | [paper_draft.md](./paper_draft.md) | Insert exact citations |
+| Related work | `done` | [paper_draft.md](./paper_draft.md), [neurips_paper.tex](./neurips_paper.tex), [references.bib](./references.bib) | Expand only if later experiments require more comparison baselines |
 | Preliminary experiments/results | `done` | [paper_draft.md](./paper_draft.md) | Replace smoke framing with full main results once larger runs finish |
 | Limitations | `done` | [paper_draft.md](./paper_draft.md) | Update after final experiments |
 | Conclusion/future work | `done` | [paper_draft.md](./paper_draft.md) | Minor revision after final tables |
-| Final paper formatting | `in_progress` | [neurips_paper.tex](./neurips_paper.tex), [references.bib](./references.bib), [README.md](./README.md) | Replace placeholder citations, compile with official NeurIPS style, and swap smoke tables for final large-run tables/figures |
+| Final paper formatting | `in_progress` | [neurips_paper.tex](./neurips_paper.tex), [references.bib](./references.bib), [README.md](./README.md) | Compile with official NeurIPS style and swap smoke tables for final large-run tables/figures |
 
 ## Core Method Evidence
 
@@ -53,6 +54,7 @@ artifacts, and commands already present in the repository.
 
 | Artifact | Status | Current Evidence / Path | Remaining Work |
 | --- | --- | --- | --- |
+| Workshop short-paper tables and figure CSVs | `in_progress` | CLI exists in [main.py](../main.py), workshop manuscript source in [workshop_paper.tex](./workshop_paper.tex) | Run the frozen workshop bundle and point the short paper at those saved outputs |
 | Synthetic localization table | `done` | [synthetic_localization_results.csv](../artifacts/synthetic_strategy_tables_3/synthetic_localization_results.csv) | Scale to larger synthetic corpus |
 | Main smoke result tables | `done` | [paper_tables.md](../artifacts/synthetic_strategy_tables_3/paper_tables.md), [paper_tables.md](../artifacts/paper_bundle_smoke_cli/paper_tables/paper_tables.md) | Produce final paper tables from full runs |
 | Figure-ready CSV data | `done` | [figure_data.csv](../artifacts/synthetic_strategy_figures_3/figure_data.csv) | Turn into camera-ready plots |
@@ -65,6 +67,7 @@ artifacts, and commands already present in the repository.
 
 | Item | Status | Evidence / Path | Remaining Work |
 | --- | --- | --- | --- |
+| Workshop bundle CLI path | `done` | [main.py](../main.py), [workshop_paper.tex](./workshop_paper.tex) | Freeze the workshop corpora and save the first release bundle |
 | One-command smoke bundle | `done` | [paper_bundle_summary.json](../artifacts/paper_bundle_smoke_cli/paper_bundle_summary.json) | Keep stable while scaling |
 | Saved paper-facing tables | `done` | [artifacts/paper_bundle_smoke_cli/paper_tables/paper_tables.json](../artifacts/paper_bundle_smoke_cli/paper_tables/paper_tables.json) | Produce full-run versions |
 | Saved autopsy reports | `done` | [artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json](../artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json) | Curate final examples |
@@ -73,13 +76,15 @@ artifacts, and commands already present in the repository.
 
 ## High-Priority Next Actions
 
-1. Scale the current clean thirty-two-case mixed-domain corpus into a materially larger frozen `retail + airline` corpus.
-2. Run strict non-oracle search on that larger corpus with saved JSON outputs.
-3. Run oracle upper-bound search on the same larger corpus to measure the continuation gap.
-4. Scale the synthetic localization suite beyond the current three controlled failures and preferably beyond one domain.
-5. Export final paper tables and figure CSVs from those runs.
-6. Curate 3-5 autopsy case studies for the paper.
-7. Add exact citations and convert the markdown draft into the final submission format.
+1. Freeze the workshop corpora for `retail + airline` and run `make-workshop-bundle`.
+2. Run the new simple retry baselines under matched budgets and save their outputs.
+3. Scale the current clean thirty-two-case mixed-domain corpus into a materially larger frozen `retail + airline` corpus.
+4. Run strict non-oracle search on that larger corpus with saved JSON outputs.
+5. Run oracle upper-bound search on the same larger corpus to measure the continuation gap.
+6. Scale the synthetic localization suite beyond the current three controlled failures and preferably beyond one domain.
+7. Export final paper tables and figure CSVs from those runs.
+8. Curate 3-5 autopsy case studies for the paper.
+9. Compile the LaTeX manuscript with the official NeurIPS style and convert the smoke tables/figures into final large-run tables/figures.
 
 ## Canonical Current Artifacts
 

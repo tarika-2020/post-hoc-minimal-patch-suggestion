@@ -751,7 +751,10 @@ hidden preprocessing steps.
 
 ## Citation Checklist
 
-The final paper draft should verify and add exact citations for at least:
+The submission-oriented LaTeX manuscript now has concrete bibliography entries
+in [references.bib](./references.bib). Before submission, the remaining
+citation work is to verify venue choices, add any newly needed baselines, and
+make sure the final manuscript still covers at least:
 
 - `tau2` / tau3 benchmark papers or repos
 - WebArena

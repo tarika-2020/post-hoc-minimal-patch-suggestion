@@ -6,11 +6,13 @@ from pathlib import Path
 from main import (
     BudgetConfig,
     FailureCollector,
+    MethodVariant,
     NaturalFailureImporter,
     PatchSearchEngine,
     RealBenchmarkRunner,
     Tau3DomainAdapter,
     build_corpus_cli,
+    build_synthetic_corpus_cli,
     collect_failures_cli,
     compare_strategies_cli,
     import_natural_failures_cli,
@@ -20,7 +22,9 @@ from main import (
     make_figures_cli,
     make_paper_bundle_cli,
     make_paper_tables_cli,
+    make_workshop_bundle_cli,
     report_autopsy_cli,
+    run_baselines_cli,
     run_batch_cli,
     search_patches_cli,
     sweep_budget_cli,
@@ -588,6 +592,133 @@ class Tau3PrototypeTests(unittest.TestCase):
             self.assertEqual(strict_payload[0]["serialization_mode"], "compact")
             for evaluation in strict_payload[0]["evaluated_candidates"]:
                 self.assertNotIn("patched_trajectory", evaluation)
+
+    def test_build_synthetic_corpus_cli_supports_mixed_domains(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            corpus_dir = root / "synthetic_corpus"
+            summary = build_synthetic_corpus_cli(
+                name="synthetic_mixed",
+                domains=["retail", "airline"],
+                limit_per_domain=1,
+                output_dir=corpus_dir,
+            )
+            self.assertEqual(sorted(summary["domains"]), ["airline", "retail"])
+            self.assertEqual(summary["entry_count"], 2)
+            self.assertTrue((corpus_dir / "corpus_manifest.json").exists())
+            self.assertTrue((corpus_dir / "failures.json").exists())
+            self.assertTrue((corpus_dir / "summary.json").exists())
+
+    def test_run_baselines_cli_writes_comparable_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            collect_dir = root / "collect"
+            baseline_dir = root / "baselines"
+            collect_failures_cli("retail", "base", 1, collect_dir)
+            report = run_baselines_cli(
+                input_dir=collect_dir,
+                output_dir=baseline_dir,
+                method_variants=[
+                    MethodVariant.RETRY_FROM_SCRATCH.value,
+                    MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value,
+                    MethodVariant.RAW_CONTINUATION_FROM_SNAPSHOT.value,
+                ],
+                proposer_backend="deterministic",
+                compact_results=True,
+            )
+            self.assertEqual(len(report["summaries"]), 3)
+            self.assertTrue((baseline_dir / "baseline_comparison.json").exists())
+            for method_variant in report["method_variants"]:
+                summary_path = baseline_dir / method_variant / "patch_summary.json"
+                results_path = baseline_dir / method_variant / "patch_results.json"
+                self.assertTrue(summary_path.exists())
+                self.assertTrue(results_path.exists())
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                self.assertEqual(summary["method_variant"], method_variant)
+
+    def test_run_batch_cli_supports_retry_method_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            collect_dir = root / "collect"
+            batch_dir = root / "batch_retry"
+            config_path = root / "retry_batch.json"
+            collect_failures_cli("retail", "base", 1, collect_dir)
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "name": "retry_batch",
+                        "input_dir": str(collect_dir),
+                        "output_dir": str(batch_dir),
+                        "method_variant": MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value,
+                        "strategy": "heuristic",
+                        "proposer_backend": "deterministic",
+                        "compact_results": True,
+                        "budget": {"max_evaluations_per_failure": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            summary = run_batch_cli(config_path)
+            self.assertEqual(
+                summary["method_variant"],
+                MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value,
+            )
+            self.assertTrue((batch_dir / "experiment_config.json").exists())
+            self.assertTrue(
+                (
+                    batch_dir
+                    / MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value
+                    / "patch_results.json"
+                ).exists()
+            )
+
+    def test_make_workshop_bundle_cli_smoke(self) -> None:
+        retail_result_path = Path(
+            "external/tau2-bench/data/tau2/results/final/"
+            "gpt-4.1-mini-2025-04-14_retail_base_gpt-4.1-2025-04-14_4trials.json"
+        )
+        airline_result_path = Path(
+            "external/tau2-bench/data/tau2/results/final/"
+            "gpt-4.1-mini-2025-04-14_airline_base_gpt-4.1-2025-04-14_4trials.json"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            bundle_dir = root / "workshop_bundle"
+            report = make_workshop_bundle_cli(
+                name="workshop_smoke",
+                natural_domain_specs=[
+                    f"retail::base::{retail_result_path}",
+                    f"airline::base::{airline_result_path}",
+                ],
+                natural_limit_per_domain=1,
+                synthetic_domains=["retail", "airline"],
+                synthetic_limit_per_domain=1,
+                output_dir=bundle_dir,
+                strict_max_evaluations=1,
+                oracle_max_evaluations=1,
+                retry_proposer_backend="deterministic",
+                continuation_horizon=2,
+                beam_width=1,
+                max_candidates_per_step=1,
+            )
+            self.assertEqual(
+                report["title"],
+                "Execution Intervention for Post-Hoc Debugging of LLM Agent Trajectories",
+            )
+            self.assertEqual(
+                sorted(report["natural_corpus_summary"]["domains"]),
+                ["airline", "retail"],
+            )
+            self.assertEqual(
+                sorted(report["synthetic_corpus_summary"]["domains"]),
+                ["airline", "retail"],
+            )
+            self.assertTrue((bundle_dir / "WORKSHOP_RELEASE.md").exists())
+            self.assertTrue((bundle_dir / "workshop_bundle_summary.json").exists())
+            self.assertTrue((bundle_dir / "natural_corpus" / "failures.json").exists())
+            self.assertTrue((bundle_dir / "synthetic_corpus" / "failures.json").exists())
+            self.assertTrue((bundle_dir / "retry_baselines" / "baseline_comparison.json").exists())
+            self.assertTrue((bundle_dir / "paper_tables" / "paper_tables.md").exists())
 
 
 if __name__ == "__main__":

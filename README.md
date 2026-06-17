@@ -29,6 +29,9 @@ What is already implemented:
 - Deterministic and OpenRouter-ready proposer backends.
 - Corpus manifests, batch experiment configs, budget sweeps, model sweeps, and figure-data generation.
 - Paper-table generation from saved experiment directories.
+- Simple rerun baselines for workshop comparisons:
+  `retry_from_scratch`, `retry_from_localized_snapshot`, and
+  `raw_continuation_from_snapshot`.
 - Synthetic localization metrics and exports:
   top-1/top-3 fault localization accuracy, MRR, fault-rank stats, and
   true-fault recovery alignment in both summaries and paper tables.
@@ -39,6 +42,9 @@ What is already implemented:
 - A one-command paper bundle path that builds a corpus, runs strict search,
   runs the oracle upper bound, emits autopsies, generates figure data, and
   writes paper tables.
+- A one-command workshop bundle path that also builds a synthetic corpus, runs
+  the workshop retry baselines, exports case studies, and writes a
+  `WORKSHOP_RELEASE.md` artifact map.
 
 What is not implemented yet:
 
@@ -474,6 +480,16 @@ python main.py build-corpus `
   --output-dir artifacts/corpus
 ```
 
+Build a synthetic mixed-domain corpus for workshop localization experiments:
+
+```powershell
+python main.py build-synthetic-corpus `
+  --name retail_airline_synthetic `
+  --domains retail airline `
+  --limit-per-domain 12 `
+  --output-dir artifacts/workshop_synthetic
+```
+
 Import natural failures from saved `tau2` results:
 
 ```powershell
@@ -550,6 +566,18 @@ python main.py run-batch --config configs/paper_batch_template.json
 ```
 
 The default paper batch template sets `compact_results = true`.
+
+Run the workshop retry baselines on a saved corpus:
+
+```powershell
+python main.py run-baselines `
+  --input-dir artifacts/corpus `
+  --output-dir artifacts/workshop_retry_baselines `
+  --method-variants retry_from_scratch retry_from_localized_snapshot raw_continuation_from_snapshot `
+  --strategy heuristic `
+  --proposer-backend openrouter `
+  --model-slug openai/gpt-4.1-mini
+```
 
 Sweep budget or model settings:
 
@@ -653,6 +681,37 @@ The bundle writes:
 - `paper_tables/paper_tables.json` and `paper_tables/paper_tables.md`
 - `paper_bundle_summary.json`
 
+Run the workshop-first bundle in one command:
+
+```powershell
+python main.py make-workshop-bundle `
+  --name workshop_bundle_smoke `
+  --natural-domain-specs `
+    retail::base::external/tau2-bench/data/tau2/results/final/gpt-4.1-mini-2025-04-14_retail_base_gpt-4.1-2025-04-14_4trials.json `
+    airline::base::external/tau2-bench/data/tau2/results/final/gpt-4.1-mini-2025-04-14_airline_base_gpt-4.1-2025-04-14_4trials.json `
+  --natural-limit-per-domain 1 `
+  --synthetic-domains retail airline `
+  --synthetic-limit-per-domain 1 `
+  --output-dir artifacts/workshop_bundle_smoke `
+  --strict-max-evaluations 1 `
+  --oracle-max-evaluations 1 `
+  --continuation-horizon 2 `
+  --beam-width 1 `
+  --max-candidates-per-step 1
+```
+
+The workshop bundle writes:
+
+- `natural_corpus/corpus_manifest.json` and `natural_corpus/failures.json`
+- `synthetic_corpus/corpus_manifest.json` and `synthetic_corpus/failures.json`
+- `strict_search/patch_summary.json`
+- `retry_baselines/baseline_comparison.json`
+- `oracle_upper_bound/patch_summary.json`
+- `paper_tables/paper_tables.json`
+- `case_studies/case_studies.json`
+- `WORKSHOP_RELEASE.md`
+- `workshop_bundle_summary.json`
+
 Run tests:
 
 ```powershell
@@ -687,6 +746,9 @@ These are the latest meaningful changes and the reason they matter:
 - A one-command bundle entrypoint:
   the repo can now build a smoke paper package end to end from raw saved
   `tau2` results.
+- A workshop-first experiment path:
+  the repo can now build synthetic plus natural corpora, run simple rerun
+  baselines, and package a short-paper artifact bundle from the CLI.
 - Mutating-step deletion recovery:
   the search can now repair natural failures where the harmful step succeeded at
   the tool level but should never have been executed.

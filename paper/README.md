@@ -10,9 +10,12 @@ just free-form notes.
 - `neurips_paper.tex`
   Submission-oriented LaTeX manuscript scaffold built from the current draft
   and current saved artifact numbers.
+- `workshop_paper.tex`
+  Separate short-paper manuscript source for the workshop-first submission
+  path. This is where the 4-8 page version can diverge cleanly from the long
+  paper while sharing the same bibliography file.
 - `references.bib`
-  Bibliography stub with explicit placeholder entries that must be replaced
-  with exact citations before submission.
+  Bibliography file with concrete benchmark and repair/search references.
 - `submission_checklist.md`
   Paper-readiness tracker tied to repo evidence.
 - `neurips_outline.md`
@@ -33,6 +36,15 @@ pdflatex neurips_paper.tex
 pdflatex neurips_paper.tex
 ```
 
+For the workshop manuscript:
+
+```text
+pdflatex workshop_paper.tex
+bibtex workshop_paper
+pdflatex workshop_paper.tex
+pdflatex workshop_paper.tex
+```
+
 ## What Is Grounded Right Now
 
 The current LaTeX manuscript uses repository-backed numbers from:
@@ -44,11 +56,18 @@ The current LaTeX manuscript uses repository-backed numbers from:
 - `artifacts/paper_bundle_multimodel_32/paper_bundle_summary.json`
 - `artifacts/paper_bundle_multimodel_32/oracle_upper_bound/patch_summary.json`
 
+The workshop manuscript is intentionally more conservative. It is grounded in
+the current methodology and artifact-backed early evidence, while the final
+frozen workshop counts should come from the new `make-workshop-bundle` path.
+
 ## Still Required Before Submission
 
-- Replace every placeholder bibliography entry in `references.bib`.
+- Verify the final venue choices for each bibliography entry and add any extra
+  citations needed for later baseline expansions.
 - Compile with the official NeurIPS style file and resolve any style issues.
 - Swap smoke-scale result tables for final large-run tables and figures.
+- Freeze the workshop corpora and run `make-workshop-bundle` for the short
+  paper artifact release.
 - Add final author metadata or anonymization details, depending on submission
   stage.
 - Convert case-study markdown artifacts into final figure panels.

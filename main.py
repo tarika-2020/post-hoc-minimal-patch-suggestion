@@ -131,6 +131,13 @@ class ProposerBackend(str, Enum):
     OPENROUTER = "openrouter"
 
 
+class MethodVariant(str, Enum):
+    PATCH_SEARCH_STRUCTURED = "patch_search_structured"
+    RETRY_FROM_SCRATCH = "retry_from_scratch"
+    RETRY_FROM_LOCALIZED_SNAPSHOT = "retry_from_localized_snapshot"
+    RAW_CONTINUATION_FROM_SNAPSHOT = "raw_continuation_from_snapshot"
+
+
 @dataclass
 class BudgetConfig:
     max_evaluations_per_failure: int | None = None
@@ -146,6 +153,7 @@ class ExperimentConfig:
     name: str
     input_dir: str
     output_dir: str
+    method_variant: str = MethodVariant.PATCH_SEARCH_STRUCTURED.value
     strategy: str = "heuristic"
     include_oracle_suffix: bool = False
     proposer_backend: str = ProposerBackend.DETERMINISTIC.value
@@ -235,6 +243,7 @@ class PatchEvaluation:
 @dataclass
 class PatchSearchResult:
     failure_id: str
+    method_variant: str
     recovered: bool
     winning_patch: PatchCandidate | None
     winning_outcome: TaskOutcome | None
@@ -737,6 +746,15 @@ def extract_actions_from_messages(task_id: str, messages: list[JsonDict]) -> lis
     return actions
 
 
+def action_from_payload(payload: JsonDict) -> TauAction:
+    return TauAction(
+        action_id=str(payload.get("action_id") or f"replayed_{payload.get('name', 'action')}"),
+        requestor=str(payload["requestor"]),
+        name=str(payload["name"]),
+        arguments=copy.deepcopy(payload.get("arguments") or {}),
+    )
+
+
 def summarize_action_errors(trajectory: TrajectoryRecord) -> JsonDict:
     error_steps = [
         step
@@ -881,6 +899,35 @@ class BaseProposer(ABC):
         budget: BudgetConfig,
     ) -> tuple[list[ContinuationCandidate], ProposerMetadata]:
         return self.propose_continuations(task, failure, step_index, patched_action, budget)
+
+    def propose_actions_from_task(
+        self,
+        task: Task,
+        budget: BudgetConfig,
+    ) -> tuple[list[ContinuationCandidate], ProposerMetadata]:
+        metadata = ProposerMetadata(
+            backend=self.backend,
+            model_slug=self.model_slug,
+            status="unsupported",
+            error="Task-level retry proposal is not implemented for this proposer.",
+        )
+        return [], metadata
+
+    def propose_actions_from_snapshot(
+        self,
+        task: Task,
+        failure: FailureCase,
+        step_index: int,
+        snapshot: EnvSnapshot,
+        budget: BudgetConfig,
+    ) -> tuple[list[ContinuationCandidate], ProposerMetadata]:
+        metadata = ProposerMetadata(
+            backend=self.backend,
+            model_slug=self.model_slug,
+            status="unsupported",
+            error="Snapshot-level retry proposal is not implemented for this proposer.",
+        )
+        return [], metadata
 
 
 class DeterministicProposer(BaseProposer):
@@ -1321,32 +1368,18 @@ class OpenRouterProposer(BaseProposer):
         )
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
 
-    def propose_continuations(
+    def _request_actions(
         self,
+        *,
         task: Task,
-        failure: FailureCase,
-        step_index: int,
-        patched_action: JsonDict,
+        prompt_payload: JsonDict,
         budget: BudgetConfig,
+        requestor: str = "assistant",
+        prompt_label: str,
+        source: str,
+        action_prefix: str,
     ) -> tuple[list[ContinuationCandidate], ProposerMetadata]:
-        prompt = json.dumps(
-            {
-                "task_id": task.id,
-                "user_scenario": task_hint_text(task),
-                "failure_id": failure.failure_id,
-                "target_step": step_index,
-                "patched_action": patched_action,
-                "recent_actions": [
-                    step.action
-                    for step in failure.trajectory.steps[max(0, step_index - 2) : step_index + 1]
-                ],
-                "instructions": (
-                    "Return JSON with key 'actions' whose value is a short list of tool actions "
-                    "to continue after the patched action. Each action needs requestor, name, and arguments."
-                ),
-            },
-            indent=2,
-        )
+        prompt = json.dumps(prompt_payload, indent=2)
         metadata = ProposerMetadata(
             backend=self.backend,
             model_slug=self.model_slug,
@@ -1364,7 +1397,7 @@ class OpenRouterProposer(BaseProposer):
                 {
                     "role": "system",
                     "content": (
-                        "You propose short structured tool continuations for benchmark agents. "
+                        "You propose short structured tool actions for benchmark agents. "
                         "Return valid JSON only."
                     ),
                 },
@@ -1413,14 +1446,14 @@ class OpenRouterProposer(BaseProposer):
             if not isinstance(action, dict):
                 continue
             name = action.get("name")
-            requestor = action.get("requestor", patched_action["requestor"])
+            action_requestor = action.get("requestor", requestor)
             arguments = action.get("arguments", {})
             if not isinstance(name, str) or not isinstance(arguments, dict):
                 continue
             normalized_actions.append(
                 {
-                    "action_id": f"{task.id}_openrouter_{index}",
-                    "requestor": requestor,
+                    "action_id": f"{task.id}_{action_prefix}_{index}",
+                    "requestor": action_requestor,
                     "name": name,
                     "arguments": arguments,
                     "info": None,
@@ -1433,14 +1466,138 @@ class OpenRouterProposer(BaseProposer):
         return (
             [
                 ContinuationCandidate(
-                    target_step=step_index,
+                    target_step=int(prompt_payload.get("target_step") or 0),
                     actions=normalized_actions,
                     token_cost=max(1, metadata.total_tokens or count_tokens(normalized_actions)),
-                    description=f"OpenRouter continuation proposal from {self.model_slug}.",
-                    metadata={"source": "openrouter", "model_slug": self.model_slug},
+                    description=f"{prompt_label} from {self.model_slug}.",
+                    metadata={"source": source, "model_slug": self.model_slug},
                 )
             ],
             metadata,
+        )
+
+    def propose_continuations(
+        self,
+        task: Task,
+        failure: FailureCase,
+        step_index: int,
+        patched_action: JsonDict,
+        budget: BudgetConfig,
+    ) -> tuple[list[ContinuationCandidate], ProposerMetadata]:
+        return self._request_actions(
+            task=task,
+            prompt_payload={
+                "task_id": task.id,
+                "user_scenario": task_hint_text(task),
+                "failure_id": failure.failure_id,
+                "target_step": step_index,
+                "patched_action": patched_action,
+                "recent_actions": [
+                    step.action
+                    for step in failure.trajectory.steps[max(0, step_index - 2) : step_index + 1]
+                ],
+                "instructions": (
+                    "Return JSON with key 'actions' whose value is a short list of tool actions "
+                    "to continue after the patched action. Each action needs requestor, name, and arguments."
+                ),
+            },
+            budget=budget,
+            requestor=str(patched_action["requestor"]),
+            prompt_label="OpenRouter continuation proposal",
+            source="openrouter",
+            action_prefix="openrouter",
+        )
+
+    def propose_runtime_continuations(
+        self,
+        task: Task,
+        failure: FailureCase,
+        step_index: int,
+        partial_trajectory: TrajectoryRecord,
+        patched_action: JsonDict,
+        budget: BudgetConfig,
+    ) -> tuple[list[ContinuationCandidate], ProposerMetadata]:
+        prompt_payload = {
+            "task_id": task.id,
+            "user_scenario": task_hint_text(task),
+            "failure_id": failure.failure_id,
+            "target_step": step_index,
+            "patched_action": patched_action,
+            "partial_tool_result": (
+                partial_trajectory.steps[-1].tool_result if partial_trajectory.steps else None
+            ),
+            "runtime_entities": extract_runtime_entities(
+                partial_trajectory.steps[-1].tool_result.get("content")
+                if partial_trajectory.steps
+                else ""
+            ),
+            "instructions": (
+                "Return JSON with key 'actions' whose value is a short list of tool actions "
+                "to continue from this replayed state. Prefer the smallest action list that can recover the task."
+            ),
+        }
+        return self._request_actions(
+            task=task,
+            prompt_payload=prompt_payload,
+            budget=budget,
+            requestor=str(patched_action["requestor"]),
+            prompt_label="OpenRouter runtime continuation proposal",
+            source="openrouter_runtime",
+            action_prefix="openrouter_runtime",
+        )
+
+    def propose_actions_from_task(
+        self,
+        task: Task,
+        budget: BudgetConfig,
+    ) -> tuple[list[ContinuationCandidate], ProposerMetadata]:
+        return self._request_actions(
+            task=task,
+            prompt_payload={
+                "task_id": task.id,
+                "user_scenario": task_hint_text(task),
+                "target_step": 0,
+                "instructions": (
+                    "Return JSON with key 'actions' whose value is a short list of tool actions "
+                    "that attempts to solve this task from scratch. Each action needs requestor, name, and arguments."
+                ),
+            },
+            budget=budget,
+            requestor="assistant",
+            prompt_label="OpenRouter retry-from-scratch proposal",
+            source="openrouter_retry_from_scratch",
+            action_prefix="openrouter_retry",
+        )
+
+    def propose_actions_from_snapshot(
+        self,
+        task: Task,
+        failure: FailureCase,
+        step_index: int,
+        snapshot: EnvSnapshot,
+        budget: BudgetConfig,
+    ) -> tuple[list[ContinuationCandidate], ProposerMetadata]:
+        recent_history = snapshot.message_history[-6:]
+        return self._request_actions(
+            task=task,
+            prompt_payload={
+                "task_id": task.id,
+                "user_scenario": task_hint_text(task),
+                "failure_id": failure.failure_id,
+                "target_step": step_index,
+                "snapshot_step_index": snapshot.step_index,
+                "recent_messages": recent_history,
+                "runtime_entities": extract_runtime_entities(recent_history),
+                "instructions": (
+                    "Return JSON with key 'actions' whose value is a short list of tool actions "
+                    "to continue this task from the restored snapshot. Each action needs requestor, name, and arguments."
+                ),
+            },
+            budget=budget,
+            requestor="assistant",
+            prompt_label="OpenRouter retry-from-snapshot proposal",
+            source="openrouter_retry_from_snapshot",
+            action_prefix="openrouter_snapshot_retry",
         )
 
 
@@ -1635,9 +1792,11 @@ class PatchSearchEngine:
             localization,
             active_budget,
             self.proposer.backend,
+            method_variant=MethodVariant.PATCH_SEARCH_STRUCTURED.value,
         )
         return PatchSearchResult(
             failure_id=failure.failure_id,
+            method_variant=MethodVariant.PATCH_SEARCH_STRUCTURED.value,
             recovered=winning is not None,
             winning_patch=winning.candidate if winning else None,
             winning_outcome=winning.outcome if winning else None,
@@ -2249,10 +2408,12 @@ class PatchSearchEngine:
         localization: LocalizationResult,
         budget: BudgetConfig,
         proposer_backend: str,
+        method_variant: str = MethodVariant.PATCH_SEARCH_STRUCTURED.value,
     ) -> JsonDict:
         source_metadata = copy.deepcopy(failure.source_metadata)
         report: JsonDict = {
             "failure_id": failure.failure_id,
+            "method_variant": method_variant,
             "domain": failure.domain,
             "task_split": failure.task_split,
             "task_id": failure.task_id,
@@ -2330,6 +2491,332 @@ class PatchSearchEngine:
         return report
 
 
+class RetryBaselineEngine:
+    def __init__(
+        self,
+        adapter: Tau3DomainAdapter,
+        proposer_backend: str = ProposerBackend.OPENROUTER.value,
+        model_slug: str | None = None,
+        budget: BudgetConfig | None = None,
+    ) -> None:
+        self.adapter = adapter
+        self.runner = RealBenchmarkRunner(adapter)
+        self.default_budget = copy.deepcopy(budget) if budget else BudgetConfig()
+        self.proposer_backend = proposer_backend
+        if proposer_backend == ProposerBackend.OPENROUTER.value:
+            self.proposer: BaseProposer = OpenRouterProposer(model_slug=model_slug)
+        else:
+            self.proposer = DeterministicProposer()
+
+    def run(
+        self,
+        failure: FailureCase,
+        method_variant: str,
+        strategy: str = "heuristic",
+        max_evaluations: int | None = None,
+        budget: BudgetConfig | None = None,
+    ) -> PatchSearchResult:
+        active_budget = copy.deepcopy(budget) if budget else copy.deepcopy(self.default_budget)
+        if max_evaluations is not None:
+            active_budget.max_evaluations_per_failure = max_evaluations
+        if method_variant == MethodVariant.RETRY_FROM_SCRATCH.value:
+            localization = LocalizationResult(
+                strategy="not_applicable",
+                ranked_steps=[],
+                suspicious_scores=[],
+                token_cost=0,
+                metadata={"method_variant": method_variant},
+            )
+        else:
+            ranked_steps, suspicious_scores = PatchSearchEngine.rank_candidate_steps(failure, strategy)
+            localization = LocalizationResult(
+                strategy=strategy,
+                ranked_steps=ranked_steps,
+                suspicious_scores=suspicious_scores,
+                token_cost=len(ranked_steps) * active_budget.localization_cost_per_step,
+                metadata={"method_variant": method_variant},
+            )
+        evaluations, total_cost = self._evaluate_baseline(
+            failure=failure,
+            method_variant=method_variant,
+            localization=localization,
+            budget=active_budget,
+        )
+        winning = next((item for item in evaluations if item.recovered), None)
+        evaluated_family_counts: dict[str, int] = {}
+        for evaluation in evaluations:
+            family = evaluation.candidate.patch_family
+            evaluated_family_counts[family] = evaluated_family_counts.get(family, 0) + 1
+        autopsy = self._build_autopsy_report(
+            failure=failure,
+            method_variant=method_variant,
+            winning=winning,
+            total_cost=total_cost,
+            localization=localization,
+            budget=active_budget,
+        )
+        return PatchSearchResult(
+            failure_id=failure.failure_id,
+            method_variant=method_variant,
+            recovered=winning is not None,
+            winning_patch=winning.candidate if winning else None,
+            winning_outcome=winning.outcome if winning else None,
+            evaluated_candidates=evaluations,
+            total_token_cost=total_cost,
+            localization=localization,
+            budget=active_budget,
+            proposer_backend=self.proposer.backend,
+            evaluated_family_counts=dict(sorted(evaluated_family_counts.items())),
+            autopsy_report=autopsy,
+        )
+
+    def _evaluate_baseline(
+        self,
+        failure: FailureCase,
+        method_variant: str,
+        localization: LocalizationResult,
+        budget: BudgetConfig,
+    ) -> tuple[list[PatchEvaluation], int]:
+        task = self.adapter.get_task(failure.task_id)
+        total_cost = localization.token_cost
+        evaluations: list[PatchEvaluation] = []
+        if method_variant == MethodVariant.RETRY_FROM_SCRATCH.value:
+            candidates, metadata = self.proposer.propose_actions_from_task(task, budget)
+            total_cost += metadata.total_tokens or metadata.prompt_tokens
+            if not candidates:
+                return evaluations, total_cost
+            continuation = candidates[0]
+            actions = [action_from_payload(action) for action in continuation.actions]
+            trajectory = self.runner.build_action_trajectory(
+                task_id=failure.task_id,
+                actions=actions,
+                fault_description="Retry-from-scratch baseline rollout.",
+            )
+            candidate = PatchCandidate(
+                target_step=0,
+                patch_family=method_variant,
+                payload={
+                    "continuation_actions": continuation.actions,
+                    "proposer_metadata": asdict(metadata),
+                },
+                size_score=len(continuation.actions),
+                token_cost=continuation.token_cost,
+                description="Rerun the task from the initial state with a fresh OpenRouter action plan.",
+            )
+            evaluations.append(
+                PatchEvaluation(
+                    candidate=candidate,
+                    recovered=trajectory.outcome.success,
+                    outcome=trajectory.outcome,
+                    patched_trajectory=trajectory,
+                    replay_cost=budget.replay_cost_per_candidate,
+                    proposer_metadata=metadata,
+                )
+            )
+            total_cost += continuation.token_cost + budget.replay_cost_per_candidate
+            return evaluations, total_cost
+
+        if not localization.ranked_steps:
+            return evaluations, total_cost
+        target_step = localization.ranked_steps[0]
+        snapshot = copy.deepcopy(failure.trajectory.steps[target_step].pre_snapshot)
+        if method_variant == MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value:
+            candidates, metadata = self.proposer.propose_actions_from_snapshot(
+                task=task,
+                failure=failure,
+                step_index=target_step,
+                snapshot=snapshot,
+                budget=budget,
+            )
+            total_cost += metadata.total_tokens or metadata.prompt_tokens
+            if not candidates:
+                return evaluations, total_cost
+            continuation = candidates[0]
+            trajectory = self.runner.continue_from_snapshot(
+                task=task,
+                snapshot=snapshot,
+                actions=[action_from_payload(action) for action in continuation.actions],
+                start_step=target_step,
+            )
+            candidate = PatchCandidate(
+                target_step=target_step,
+                patch_family=method_variant,
+                payload={
+                    "continuation_actions": continuation.actions,
+                    "proposer_metadata": asdict(metadata),
+                },
+                size_score=len(continuation.actions),
+                token_cost=continuation.token_cost,
+                description="Restore the localized snapshot and continue with a fresh unstructured retry suffix.",
+            )
+            evaluations.append(
+                PatchEvaluation(
+                    candidate=candidate,
+                    recovered=trajectory.outcome.success,
+                    outcome=trajectory.outcome,
+                    patched_trajectory=trajectory,
+                    replay_cost=budget.replay_cost_per_candidate,
+                    proposer_metadata=metadata,
+                )
+            )
+            total_cost += continuation.token_cost + budget.replay_cost_per_candidate
+            return evaluations, total_cost
+
+        if method_variant == MethodVariant.RAW_CONTINUATION_FROM_SNAPSHOT.value:
+            original_action = failure.trajectory.steps[target_step].action
+            partial = self.runner.continue_from_snapshot(
+                task=task,
+                snapshot=snapshot,
+                actions=[action_from_payload(original_action)],
+                start_step=target_step,
+                finalize=False,
+            )
+            candidates, metadata = self.proposer.propose_runtime_continuations(
+                task=task,
+                failure=failure,
+                step_index=target_step,
+                partial_trajectory=partial,
+                patched_action=original_action,
+                budget=budget,
+            )
+            total_cost += metadata.total_tokens or metadata.prompt_tokens
+            continuation = candidates[0] if candidates else None
+            replay_actions = [action_from_payload(original_action)]
+            continuation_payload: list[JsonDict] = []
+            if continuation is not None:
+                continuation_payload = continuation.actions
+                replay_actions.extend(action_from_payload(action) for action in continuation.actions)
+                continuation_cost = continuation.token_cost
+            else:
+                continuation_cost = 0
+            trajectory = self.runner.continue_from_snapshot(
+                task=task,
+                snapshot=snapshot,
+                actions=replay_actions,
+                start_step=target_step,
+            )
+            candidate = PatchCandidate(
+                target_step=target_step,
+                patch_family=method_variant,
+                payload={
+                    "original_action": original_action,
+                    "continuation_actions": continuation_payload,
+                    "proposer_metadata": asdict(metadata),
+                },
+                size_score=len(continuation_payload),
+                token_cost=continuation_cost,
+                description="Replay the original failing action, then request a fresh downstream continuation only.",
+            )
+            evaluations.append(
+                PatchEvaluation(
+                    candidate=candidate,
+                    recovered=trajectory.outcome.success,
+                    outcome=trajectory.outcome,
+                    patched_trajectory=trajectory,
+                    replay_cost=budget.replay_cost_per_candidate,
+                    proposer_metadata=metadata,
+                )
+            )
+            total_cost += continuation_cost + budget.replay_cost_per_candidate
+            return evaluations, total_cost
+
+        raise ValueError(f"Unsupported method variant: {method_variant}")
+
+    @staticmethod
+    def _build_autopsy_report(
+        failure: FailureCase,
+        method_variant: str,
+        winning: PatchEvaluation | None,
+        total_cost: int,
+        localization: LocalizationResult,
+        budget: BudgetConfig,
+    ) -> JsonDict:
+        source_metadata = copy.deepcopy(failure.source_metadata)
+        report: JsonDict = {
+            "failure_id": failure.failure_id,
+            "method_variant": method_variant,
+            "domain": failure.domain,
+            "task_split": failure.task_split,
+            "task_id": failure.task_id,
+            "original_reward": failure.trajectory.outcome.reward,
+            "original_failure_reason": failure.failure_reason,
+            "recovered": winning is not None,
+            "total_token_cost": total_cost,
+            "fault_step": failure.trajectory.fault_step,
+            "fault_description": failure.trajectory.fault_description,
+            "known_fault_step": failure.trajectory.fault_step,
+            "continuation_mode": method_variant,
+            "localization": asdict(localization),
+            "budget": asdict(budget),
+            "proposer_backend": (
+                winning.proposer_metadata.backend
+                if winning is not None and winning.proposer_metadata is not None
+                else ProposerBackend.DETERMINISTIC.value
+            ),
+            "failure_source": failure.source,
+            "benchmark_source_path": source_metadata.get("results_path") or "",
+            "source_metadata": source_metadata,
+        }
+        if winning is None:
+            report["summary"] = f"No successful {method_variant} rollout was found."
+            return report
+        target_step = winning.candidate.target_step
+        original_action = (
+            failure.trajectory.steps[target_step].action
+            if 0 <= target_step < len(failure.trajectory.steps)
+            else None
+        )
+        baseline_first_action = (
+            winning.patched_trajectory.steps[0].action if winning.patched_trajectory.steps else None
+        )
+        explanations = {
+            MethodVariant.RETRY_FROM_SCRATCH.value: (
+                "A full retry from the initial task state recovered the benchmark reward."
+            ),
+            MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value: (
+                f"A fresh retry from localized snapshot step {target_step} recovered the benchmark reward."
+            ),
+            MethodVariant.RAW_CONTINUATION_FROM_SNAPSHOT.value: (
+                f"Replaying the original action at step {target_step} and generating a fresh continuation recovered the benchmark reward."
+            ),
+        }
+        report.update(
+            {
+                "root_cause_step": (
+                    None if method_variant == MethodVariant.RETRY_FROM_SCRATCH.value else target_step
+                ),
+                "patch_family": method_variant,
+                "patch_size": winning.candidate.size_score,
+                "patch_description": winning.candidate.description,
+                "original_action": original_action,
+                "patched_action": baseline_first_action,
+                "original_state_fragment": {
+                    "message_history_length": len(failure.trajectory.steps[target_step].pre_snapshot.message_history)
+                    if 0 <= target_step < len(failure.trajectory.steps)
+                    else 0,
+                    "agent_db_keys": sorted(
+                        failure.trajectory.steps[target_step].pre_snapshot.agent_db.keys()
+                    )[:10]
+                    if 0 <= target_step < len(failure.trajectory.steps)
+                    else [],
+                },
+                "patched_state_fragment": {
+                    "message_history_length": len(winning.patched_trajectory.final_snapshot.message_history),
+                    "agent_db_keys": sorted(winning.patched_trajectory.final_snapshot.agent_db.keys())[:10],
+                },
+                "winning_outcome_reason": winning.outcome.reason,
+                "natural_language_explanation": explanations.get(
+                    method_variant,
+                    f"The {method_variant} baseline recovered benchmark reward.",
+                ),
+                "summary": (
+                    f"Recovered {failure.failure_id} with baseline {method_variant}."
+                ),
+            }
+        )
+        return report
+
+
 def reconstruct_snapshot(payload: JsonDict) -> EnvSnapshot:
     return EnvSnapshot(**payload)
 
@@ -2374,17 +2861,66 @@ def reconstruct_failures(payload: list[JsonDict]) -> list[FailureCase]:
     ]
 
 
+def select_collectable_task_ids(
+    adapter: Tau3DomainAdapter,
+    limit: int,
+) -> tuple[list[str], list[str]]:
+    selected: list[str] = []
+    skipped: list[str] = []
+    for task_id, task in adapter.tasks.items():
+        try:
+            RealBenchmarkRunner._require_task_actions(task)
+        except ValueError:
+            skipped.append(task_id)
+            continue
+        selected.append(task_id)
+        if len(selected) >= limit:
+            break
+    return selected, skipped
+
+
+def collect_synthetic_failures(
+    adapter: Tau3DomainAdapter,
+    limit: int,
+) -> tuple[list[TrajectoryRecord], list[FailureCase], list[TrajectoryRecord], list[str], list[str]]:
+    collector = FailureCollector(adapter)
+    reference_runner = RealBenchmarkRunner(adapter)
+    reference_trajectories: list[TrajectoryRecord] = []
+    trajectories: list[TrajectoryRecord] = []
+    failures: list[FailureCase] = []
+    selected_task_ids: list[str] = []
+    skipped_task_ids: list[str] = []
+    for task_id, task in adapter.tasks.items():
+        try:
+            RealBenchmarkRunner._require_task_actions(task)
+        except ValueError:
+            skipped_task_ids.append(task_id)
+            continue
+        selected_task_ids.append(task_id)
+        reference_trajectories.append(reference_runner.build_reference_trajectory(task_id))
+        collected_trajectories, collected_failures = collector.collect([task_id])
+        trajectories.extend(collected_trajectories)
+        failures.extend(collected_failures)
+        if len(failures) >= limit:
+            break
+    return reference_trajectories, trajectories[:limit], failures[:limit], selected_task_ids, skipped_task_ids
+
+
 def collect_failures_cli(domain: str, task_split: str, limit: int, output_dir: Path) -> JsonDict:
     adapter = Tau3DomainAdapter(domain=domain, task_split=task_split)
-    collector = FailureCollector(adapter)
-    task_ids = list(adapter.tasks.keys())[:limit]
-    reference_runner = RealBenchmarkRunner(adapter)
-    reference_trajectories = [reference_runner.build_reference_trajectory(task_id) for task_id in task_ids]
-    trajectories, failures = collector.collect(task_ids)
+    (
+        reference_trajectories,
+        trajectories,
+        failures,
+        task_ids,
+        skipped_task_ids,
+    ) = collect_synthetic_failures(adapter, limit)
     summary = {
         "domain": domain,
         "task_split": task_split,
         "task_count": len(task_ids),
+        "skipped_task_count": len(skipped_task_ids),
+        "skipped_task_ids": skipped_task_ids,
         "reference_success_count": sum(1 for item in reference_trajectories if item.outcome.success),
         "failure_count": len(failures),
         "failure_ids": [item.failure_id for item in failures],
@@ -2485,6 +3021,69 @@ def build_corpus_cli(
     }
 
 
+def build_synthetic_corpus_cli(
+    name: str,
+    domains: list[str],
+    limit_per_domain: int,
+    output_dir: Path,
+    task_split: str = "base",
+) -> JsonDict:
+    entries: list[FailureCorpusEntry] = []
+    all_failures: list[FailureCase] = []
+    ordered_domains: list[str] = []
+    global_index = 0
+    for domain in domains:
+        adapter = Tau3DomainAdapter(domain=domain, task_split=task_split)
+        _, _, failures, _, _ = collect_synthetic_failures(adapter, limit_per_domain)
+        ordered_domains.append(domain)
+        for failure in failures:
+            trajectory = failure.trajectory
+            tool_error_count = sum(1 for step in trajectory.steps if step.tool_result.get("error"))
+            entry = FailureCorpusEntry(
+                failure_id=failure.failure_id,
+                domain=domain,
+                task_split=failure.task_split,
+                task_id=failure.task_id,
+                split=assign_split(global_index),
+                source=failure.source,
+                source_path="synthetic_failure_collector",
+                original_reward=0.0,
+                replay_reward=trajectory.outcome.reward,
+                tool_call_count=len(trajectory.steps),
+                tool_error_count=tool_error_count,
+                step_count=len(trajectory.steps),
+                failure_reason=failure.failure_reason,
+            )
+            entries.append(entry)
+            all_failures.append(failure)
+            global_index += 1
+    split_counts: dict[str, int] = {}
+    for entry in entries:
+        split_counts[entry.split] = split_counts.get(entry.split, 0) + 1
+    manifest = FailureCorpusManifest(
+        name=name,
+        domains=sorted(set(ordered_domains)),
+        entry_count=len(entries),
+        split_counts=dict(sorted(split_counts.items())),
+        entries=entries,
+    )
+    rows = [asdict(entry) for entry in entries]
+    save_json(output_dir / "corpus_manifest.json", manifest)
+    save_json(output_dir / "failures.json", all_failures)
+    if rows:
+        save_csv(output_dir / "corpus_manifest.csv", rows, list(rows[0].keys()))
+    summary = {
+        "name": name,
+        "domains": manifest.domains,
+        "entry_count": manifest.entry_count,
+        "split_counts": manifest.split_counts,
+        "task_split": task_split,
+        "limit_per_domain": limit_per_domain,
+    }
+    save_json(output_dir / "summary.json", summary)
+    return summary
+
+
 def search_patches_cli(
     input_dir: Path,
     output_dir: Path,
@@ -2502,6 +3101,7 @@ def search_patches_cli(
     failures = reconstruct_failures(failures_payload)
     if not failures:
         summary = {
+            "method_variant": MethodVariant.PATCH_SEARCH_STRUCTURED.value,
             "strategy": strategy,
             "include_oracle_suffix": include_oracle_suffix,
             "proposer_backend": proposer_backend,
@@ -2563,6 +3163,7 @@ def search_patches_cli(
     token_costs = [item.total_token_cost for item in results]
     localization_metrics = build_localization_metrics([asdict(item) for item in results])
     summary = {
+        "method_variant": MethodVariant.PATCH_SEARCH_STRUCTURED.value,
         "strategy": strategy,
         "include_oracle_suffix": include_oracle_suffix,
         "proposer_backend": proposer_backend,
@@ -2595,6 +3196,122 @@ def search_patches_cli(
     )
     save_json(output_dir / "patch_summary.json", summary)
     return summary
+
+
+def run_baselines_cli(
+    input_dir: Path,
+    output_dir: Path,
+    method_variants: list[str],
+    strategy: str = "heuristic",
+    max_evaluations: int | None = None,
+    proposer_backend: str = ProposerBackend.OPENROUTER.value,
+    model_slug: str | None = None,
+    continuation_horizon: int = 3,
+    beam_width: int = 2,
+    compact_results: bool = False,
+) -> JsonDict:
+    failures_payload = load_json(input_dir / "failures.json")
+    failures = reconstruct_failures(failures_payload)
+    budget = BudgetConfig(
+        max_evaluations_per_failure=max_evaluations,
+        continuation_horizon=continuation_horizon,
+        beam_width=beam_width,
+    )
+    summaries: list[JsonDict] = []
+    for method_variant in method_variants:
+        variant_dir = output_dir / method_variant
+        if not failures:
+            summary = {
+                "method_variant": method_variant,
+                "strategy": strategy,
+                "proposer_backend": proposer_backend,
+                "model_slug": model_slug,
+                "compact_results": compact_results,
+                "failure_count": 0,
+                "recovered_count": 0,
+                "success_recovery_rate": 0.0,
+                "total_token_cost": 0,
+                "evaluated_candidate_count": 0,
+                "average_patch_size": 0.0,
+                "known_fault_count": 0,
+                "known_fault_recovered_count": 0,
+                "localization_top1_accuracy": 0.0,
+                "localization_top3_accuracy": 0.0,
+                "localization_mrr": 0.0,
+                "mean_fault_rank": 0.0,
+                "median_fault_rank": 0.0,
+                "true_fault_recovery_rate": 0.0,
+                "recovered_true_fault_alignment": 0.0,
+            }
+            save_json(variant_dir / "patch_results.json", [])
+            save_json(variant_dir / "patch_summary.json", summary)
+            summaries.append(summary)
+            continue
+        engines: dict[tuple[str, str], RetryBaselineEngine] = {}
+        results: list[PatchSearchResult] = []
+        for failure in failures:
+            engine_key = (failure.domain, failure.task_split)
+            if engine_key not in engines:
+                adapter = Tau3DomainAdapter(domain=failure.domain, task_split=failure.task_split)
+                engines[engine_key] = RetryBaselineEngine(
+                    adapter=adapter,
+                    proposer_backend=proposer_backend,
+                    model_slug=model_slug,
+                    budget=budget,
+                )
+            results.append(
+                engines[engine_key].run(
+                    failure=failure,
+                    method_variant=method_variant,
+                    strategy=strategy,
+                    max_evaluations=max_evaluations,
+                    budget=budget,
+                )
+            )
+        recovered = sum(1 for item in results if item.recovered)
+        patch_sizes = [
+            item.winning_patch.size_score for item in results if item.winning_patch is not None
+        ]
+        token_costs = [item.total_token_cost for item in results]
+        localization_metrics = build_localization_metrics([asdict(item) for item in results])
+        summary = {
+            "method_variant": method_variant,
+            "strategy": strategy,
+            "proposer_backend": proposer_backend,
+            "model_slug": model_slug,
+            "domains": sorted({failure.domain for failure in failures}),
+            "task_splits": sorted({failure.task_split for failure in failures}),
+            "failure_count": len(results),
+            "recovered_count": recovered,
+            "success_recovery_rate": recovered / len(results) if results else 0.0,
+            "total_token_cost": sum(item.total_token_cost for item in results),
+            "max_evaluations_per_failure": max_evaluations,
+            "continuation_horizon": continuation_horizon,
+            "beam_width": beam_width,
+            "evaluated_candidate_count": sum(len(item.evaluated_candidates) for item in results),
+            "evaluated_family_counts": {method_variant: sum(len(item.evaluated_candidates) for item in results)},
+            "compact_results": compact_results,
+            "average_patch_size": sum(patch_sizes) / len(patch_sizes) if patch_sizes else 0.0,
+            "median_token_cost": statistics.median(token_costs) if token_costs else 0.0,
+            "p90_token_cost": percentile(token_costs, 0.9),
+            **localization_metrics,
+        }
+        save_json(
+            variant_dir / "patch_results.json",
+            serialize_patch_search_results(results, compact=compact_results),
+        )
+        save_json(variant_dir / "patch_summary.json", summary)
+        summaries.append(summary)
+    report = {
+        "method_variants": method_variants,
+        "strategy": strategy,
+        "proposer_backend": proposer_backend,
+        "model_slug": model_slug,
+        "compact_results": compact_results,
+        "summaries": summaries,
+    }
+    save_json(output_dir / "baseline_comparison.json", report)
+    return report
 
 
 def compare_strategies_cli(
@@ -2780,6 +3497,9 @@ def make_paper_tables_cli(
         main_rows.append(
             {
                 "label": label,
+                "method_variant": summary.get(
+                    "method_variant", MethodVariant.PATCH_SEARCH_STRUCTURED.value
+                ),
                 "strategy": summary.get("strategy", ""),
                 "proposer_backend": (
                     summary.get("proposer_backend") or ProposerBackend.DETERMINISTIC.value
@@ -2869,12 +3589,12 @@ def make_paper_tables_cli(
         "",
         "## Main Results",
         "",
-        "| label | strategy | proposer_backend | include_oracle_suffix | recovered_count | failure_count | success_recovery_rate | total_token_cost | median_token_cost | p90_token_cost | average_patch_size | success_at_k | cost_normalized_recovery |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| label | method_variant | strategy | proposer_backend | include_oracle_suffix | recovered_count | failure_count | success_recovery_rate | total_token_cost | median_token_cost | p90_token_cost | average_patch_size | success_at_k | cost_normalized_recovery |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in main_rows:
         markdown_lines.append(
-            f"| {row['label']} | {row['strategy']} | {row['proposer_backend']} | "
+            f"| {row['label']} | {row['method_variant']} | {row['strategy']} | {row['proposer_backend']} | "
             f"{int(bool(row['include_oracle_suffix']))} | {row['recovered_count']} | {row['failure_count']} | "
             f"{row['success_recovery_rate']:.3f} | {row['total_token_cost']} | {row['median_token_cost']:.1f} | "
             f"{row['p90_token_cost']:.1f} | {row['average_patch_size']:.3f} | {row['success_at_k']:.3f} | "
@@ -3020,6 +3740,226 @@ def make_paper_bundle_cli(
     return bundle_report
 
 
+def make_workshop_bundle_cli(
+    name: str,
+    natural_domain_specs: list[str],
+    natural_limit_per_domain: int,
+    synthetic_domains: list[str],
+    synthetic_limit_per_domain: int,
+    output_dir: Path,
+    strict_strategy: str = "heuristic",
+    strict_max_evaluations: int | None = None,
+    oracle_max_evaluations: int | None = None,
+    retry_method_variants: list[str] | None = None,
+    retry_proposer_backend: str = ProposerBackend.OPENROUTER.value,
+    retry_model_slug: str | None = None,
+    continuation_horizon: int = 3,
+    beam_width: int = 2,
+    max_candidates_per_step: int | None = None,
+    compact_results: bool = True,
+) -> JsonDict:
+    retry_variants = retry_method_variants or [
+        MethodVariant.RETRY_FROM_SCRATCH.value,
+        MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value,
+        MethodVariant.RAW_CONTINUATION_FROM_SNAPSHOT.value,
+    ]
+    natural_corpus_dir = output_dir / "natural_corpus"
+    synthetic_corpus_dir = output_dir / "synthetic_corpus"
+    strict_dir = output_dir / "strict_search"
+    oracle_dir = output_dir / "oracle_upper_bound"
+    retry_dir = output_dir / "retry_baselines"
+    synthetic_compare_dir = output_dir / "synthetic_strategy_comparison"
+    budget_dir = output_dir / "budget_sweep"
+    figures_dir = output_dir / "figures"
+    tables_dir = output_dir / "paper_tables"
+    case_dir = output_dir / "case_studies"
+    guide_dir = output_dir / "reviewer_artifact_guide"
+    strict_autopsy_path = output_dir / "strict_autopsy_report.json"
+    oracle_autopsy_path = output_dir / "oracle_autopsy_report.json"
+
+    natural_corpus_summary = build_corpus_cli(
+        name=f"{name}_natural",
+        domain_specs=natural_domain_specs,
+        limit_per_domain=natural_limit_per_domain,
+        output_dir=natural_corpus_dir,
+    )
+    synthetic_corpus_summary = build_synthetic_corpus_cli(
+        name=f"{name}_synthetic",
+        domains=synthetic_domains,
+        limit_per_domain=synthetic_limit_per_domain,
+        output_dir=synthetic_corpus_dir,
+    )
+    strict_summary = search_patches_cli(
+        input_dir=natural_corpus_dir,
+        output_dir=strict_dir,
+        strategy=strict_strategy,
+        max_evaluations=strict_max_evaluations,
+        include_oracle_suffix=False,
+        proposer_backend=ProposerBackend.DETERMINISTIC.value,
+        continuation_horizon=continuation_horizon,
+        beam_width=beam_width,
+        max_candidates_per_step=max_candidates_per_step,
+        compact_results=compact_results,
+    )
+    strict_autopsy = report_autopsy_cli(strict_dir, strict_autopsy_path)
+    baseline_report = run_baselines_cli(
+        input_dir=natural_corpus_dir,
+        output_dir=retry_dir,
+        method_variants=retry_variants,
+        strategy=strict_strategy,
+        max_evaluations=strict_max_evaluations,
+        proposer_backend=retry_proposer_backend,
+        model_slug=retry_model_slug,
+        continuation_horizon=continuation_horizon,
+        beam_width=beam_width,
+        compact_results=compact_results,
+    )
+    oracle_summary = search_patches_cli(
+        input_dir=natural_corpus_dir,
+        output_dir=oracle_dir,
+        strategy=strict_strategy,
+        max_evaluations=oracle_max_evaluations,
+        include_oracle_suffix=True,
+        proposer_backend=ProposerBackend.DETERMINISTIC.value,
+        continuation_horizon=continuation_horizon,
+        beam_width=beam_width,
+        max_candidates_per_step=max_candidates_per_step,
+        compact_results=compact_results,
+    )
+    oracle_autopsy = report_autopsy_cli(oracle_dir, oracle_autopsy_path)
+    synthetic_report = compare_strategies_cli(
+        input_dir=synthetic_corpus_dir,
+        output_dir=synthetic_compare_dir,
+        strategies=[
+            "heuristic",
+            "reverse",
+            "chronological",
+            "latest_only",
+            "oracle_fault_step",
+            "random_candidate",
+            "no_repair",
+        ],
+        max_evaluations=strict_max_evaluations,
+        proposer_backend=ProposerBackend.DETERMINISTIC.value,
+        continuation_horizon=continuation_horizon,
+        beam_width=beam_width,
+        max_candidates_per_step=max_candidates_per_step,
+        compact_results=compact_results,
+    )
+    budget_report = sweep_budget_cli(
+        input_dir=natural_corpus_dir,
+        output_dir=budget_dir,
+        strategy=strict_strategy,
+        evaluation_budgets=[1, 2, 4],
+        proposer_backend=ProposerBackend.DETERMINISTIC.value,
+        compact_results=compact_results,
+    )
+    figure_inputs = [strict_dir, oracle_dir]
+    figure_inputs.extend(retry_dir / item for item in retry_variants)
+    figure_inputs.extend(
+        synthetic_compare_dir / item
+        for item in [
+            "heuristic",
+            "reverse",
+            "chronological",
+            "latest_only",
+            "oracle_fault_step",
+            "random_candidate",
+            "no_repair",
+        ]
+    )
+    figure_report = make_figures_cli(figure_inputs, figures_dir)
+    table_report = make_paper_tables_cli(figure_inputs, tables_dir)
+    case_report = make_case_studies_cli(
+        input_paths=[strict_autopsy_path],
+        output_dir=case_dir,
+        title="Workshop Case Studies",
+        max_cases=3,
+    )
+    artifact_guide = make_artifact_guide_cli(
+        input_dirs=[strict_dir, oracle_dir, retry_dir, synthetic_compare_dir, tables_dir, case_dir],
+        output_dir=guide_dir,
+        title="Workshop Reviewer Artifact Guide",
+        paper_draft_path=Path("paper/paper_draft.md"),
+        checklist_path=Path("paper/submission_checklist.md"),
+    )
+    release_lines = [
+        "# Workshop Release",
+        "",
+        f"- Title: `Execution Intervention for Post-Hoc Debugging of LLM Agent Trajectories`",
+        f"- Natural corpus entries: `{natural_corpus_summary['entry_count']}`",
+        f"- Synthetic corpus entries: `{synthetic_corpus_summary['entry_count']}`",
+        f"- Strict natural recovery: `{strict_summary['recovered_count']} / {strict_summary['failure_count']}`",
+        f"- Oracle natural recovery: `{oracle_summary['recovered_count']} / {oracle_summary['failure_count']}`",
+        f"- Retry baselines: `{retry_variants}`",
+        "",
+        "## Artifact Map",
+        "",
+        f"- Natural corpus: `{natural_corpus_dir}`",
+        f"- Synthetic corpus: `{synthetic_corpus_dir}`",
+        f"- Strict search: `{strict_dir}`",
+        f"- Oracle upper bound: `{oracle_dir}`",
+        f"- Retry baselines: `{retry_dir}`",
+        f"- Synthetic comparison: `{synthetic_compare_dir}`",
+        f"- Budget sweep: `{budget_dir}`",
+        f"- Paper tables: `{tables_dir}`",
+        f"- Case studies: `{case_dir}`",
+        f"- Reviewer guide: `{guide_dir}`",
+    ]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with (output_dir / "WORKSHOP_RELEASE.md").open("w", encoding="utf-8") as handle:
+        handle.write("\n".join(release_lines) + "\n")
+    report = {
+        "name": name,
+        "title": "Execution Intervention for Post-Hoc Debugging of LLM Agent Trajectories",
+        "natural_domain_specs": natural_domain_specs,
+        "natural_limit_per_domain": natural_limit_per_domain,
+        "synthetic_domains": synthetic_domains,
+        "synthetic_limit_per_domain": synthetic_limit_per_domain,
+        "strict_strategy": strict_strategy,
+        "strict_max_evaluations": strict_max_evaluations,
+        "oracle_max_evaluations": oracle_max_evaluations,
+        "retry_method_variants": retry_variants,
+        "retry_proposer_backend": retry_proposer_backend,
+        "retry_model_slug": retry_model_slug,
+        "continuation_horizon": continuation_horizon,
+        "beam_width": beam_width,
+        "max_candidates_per_step": max_candidates_per_step,
+        "compact_results": compact_results,
+        "natural_corpus_summary": natural_corpus_summary,
+        "synthetic_corpus_summary": synthetic_corpus_summary,
+        "strict_summary": strict_summary,
+        "strict_autopsy": strict_autopsy,
+        "baseline_report": baseline_report,
+        "oracle_summary": oracle_summary,
+        "oracle_autopsy": oracle_autopsy,
+        "synthetic_report": synthetic_report,
+        "budget_report": budget_report,
+        "figure_report": figure_report,
+        "table_report": table_report,
+        "case_report": case_report,
+        "artifact_guide": artifact_guide,
+        "paths": {
+            "natural_corpus_dir": str(natural_corpus_dir),
+            "synthetic_corpus_dir": str(synthetic_corpus_dir),
+            "strict_dir": str(strict_dir),
+            "retry_dir": str(retry_dir),
+            "oracle_dir": str(oracle_dir),
+            "synthetic_compare_dir": str(synthetic_compare_dir),
+            "budget_dir": str(budget_dir),
+            "figures_dir": str(figures_dir),
+            "tables_dir": str(tables_dir),
+            "case_dir": str(case_dir),
+            "guide_dir": str(guide_dir),
+            "strict_autopsy_path": str(strict_autopsy_path),
+            "oracle_autopsy_path": str(oracle_autopsy_path),
+            "workshop_release_path": str(output_dir / "WORKSHOP_RELEASE.md"),
+        },
+    }
+    save_json(output_dir / "workshop_bundle_summary.json", report)
+    return report
+
+
 def run_batch_cli(
     config_path: Path,
     output_dir: Path | None = None,
@@ -3031,6 +3971,9 @@ def run_batch_cli(
         name=payload["name"],
         input_dir=payload["input_dir"],
         output_dir=payload["output_dir"],
+        method_variant=payload.get(
+            "method_variant", MethodVariant.PATCH_SEARCH_STRUCTURED.value
+        ),
         strategy=payload.get("strategy", "heuristic"),
         include_oracle_suffix=payload.get("include_oracle_suffix", False),
         proposer_backend=payload.get("proposer_backend", ProposerBackend.DETERMINISTIC.value),
@@ -3039,19 +3982,34 @@ def run_batch_cli(
         budget=budget,
     )
     target_output_dir = output_dir or Path(config.output_dir)
-    summary = search_patches_cli(
-        input_dir=Path(config.input_dir),
-        output_dir=target_output_dir,
-        strategy=config.strategy,
-        max_evaluations=config.budget.max_evaluations_per_failure,
-        include_oracle_suffix=config.include_oracle_suffix,
-        proposer_backend=config.proposer_backend,
-        model_slug=config.model_slug,
-        continuation_horizon=config.budget.continuation_horizon,
-        beam_width=config.budget.beam_width,
-        max_candidates_per_step=config.budget.max_candidates_per_step,
-        compact_results=config.compact_results,
-    )
+    if config.method_variant == MethodVariant.PATCH_SEARCH_STRUCTURED.value:
+        summary = search_patches_cli(
+            input_dir=Path(config.input_dir),
+            output_dir=target_output_dir,
+            strategy=config.strategy,
+            max_evaluations=config.budget.max_evaluations_per_failure,
+            include_oracle_suffix=config.include_oracle_suffix,
+            proposer_backend=config.proposer_backend,
+            model_slug=config.model_slug,
+            continuation_horizon=config.budget.continuation_horizon,
+            beam_width=config.budget.beam_width,
+            max_candidates_per_step=config.budget.max_candidates_per_step,
+            compact_results=config.compact_results,
+        )
+    else:
+        baseline_report = run_baselines_cli(
+            input_dir=Path(config.input_dir),
+            output_dir=target_output_dir,
+            method_variants=[config.method_variant],
+            strategy=config.strategy,
+            max_evaluations=config.budget.max_evaluations_per_failure,
+            proposer_backend=config.proposer_backend,
+            model_slug=config.model_slug,
+            continuation_horizon=config.budget.continuation_horizon,
+            beam_width=config.budget.beam_width,
+            compact_results=config.compact_results,
+        )
+        summary = baseline_report["summaries"][0]
     save_json(target_output_dir / "experiment_config.json", config)
     return summary
 
@@ -3148,6 +4106,9 @@ def make_figures_cli(
         rows.append(
             {
                 "label": input_dir.name,
+                "method_variant": summary.get(
+                    "method_variant", MethodVariant.PATCH_SEARCH_STRUCTURED.value
+                ),
                 "success_recovery_rate": summary.get("success_recovery_rate", 0.0),
                 "total_token_cost": summary.get("total_token_cost", 0),
                 "average_patch_size": summary.get("average_patch_size", 0.0),
@@ -3162,12 +4123,12 @@ def make_figures_cli(
     markdown_lines = [
         "# Paper Figure Data",
         "",
-        "| label | success_recovery_rate | total_token_cost | average_patch_size | known_fault_count | localization_top1_accuracy | localization_mrr | true_fault_recovery_rate |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| label | method_variant | success_recovery_rate | total_token_cost | average_patch_size | known_fault_count | localization_top1_accuracy | localization_mrr | true_fault_recovery_rate |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         markdown_lines.append(
-            f"| {row['label']} | {row['success_recovery_rate']:.3f} | "
+            f"| {row['label']} | {row['method_variant']} | {row['success_recovery_rate']:.3f} | "
             f"{row['total_token_cost']} | {row['average_patch_size']:.3f} | "
             f"{row['known_fault_count']} | {row['localization_top1_accuracy']:.3f} | "
             f"{row['localization_mrr']:.3f} | {row['true_fault_recovery_rate']:.3f} |"
@@ -3202,7 +4163,13 @@ def build_environment_manifest() -> JsonDict:
 
 def _artifact_entry_paths(input_dir: Path) -> list[str]:
     candidates = [
+        "workshop_bundle_summary.json",
+        "WORKSHOP_RELEASE.md",
         "paper_bundle_summary.json",
+        "baseline_comparison.json",
+        "strategy_comparison.json",
+        "corpus_manifest.json",
+        "summary.json",
         "patch_summary.json",
         "patch_results.json",
         "paper_tables.json",
@@ -3227,9 +4194,33 @@ def summarize_artifact_dir(input_dir: Path) -> JsonDict:
         "path": str(input_dir),
         "available_files": _artifact_entry_paths(input_dir),
     }
+    workshop_summary_path = input_dir / "workshop_bundle_summary.json"
     bundle_summary_path = input_dir / "paper_bundle_summary.json"
+    baseline_report_path = input_dir / "baseline_comparison.json"
+    strategy_report_path = input_dir / "strategy_comparison.json"
+    corpus_manifest_path = input_dir / "corpus_manifest.json"
+    corpus_summary_path = input_dir / "summary.json"
     patch_summary_path = input_dir / "patch_summary.json"
     paper_tables_path = input_dir / "paper_tables.json"
+
+    if workshop_summary_path.exists():
+        payload = load_json(workshop_summary_path)
+        entry.update(
+            {
+                "artifact_type": "workshop_bundle",
+                "title": payload.get("title", ""),
+                "natural_entry_count": payload.get("natural_corpus_summary", {}).get("entry_count", 0),
+                "synthetic_entry_count": payload.get("synthetic_corpus_summary", {}).get("entry_count", 0),
+                "strict_success_recovery_rate": payload.get("strict_summary", {}).get(
+                    "success_recovery_rate", 0.0
+                ),
+                "oracle_success_recovery_rate": payload.get("oracle_summary", {}).get(
+                    "success_recovery_rate", 0.0
+                ),
+                "retry_method_variants": payload.get("retry_method_variants", []),
+            }
+        )
+        return entry
 
     if bundle_summary_path.exists():
         payload = load_json(bundle_summary_path)
@@ -3258,11 +4249,62 @@ def summarize_artifact_dir(input_dir: Path) -> JsonDict:
         )
         return entry
 
+    if baseline_report_path.exists():
+        payload = load_json(baseline_report_path)
+        summaries = payload.get("summaries", [])
+        entry.update(
+            {
+                "artifact_type": "baseline_comparison",
+                "method_variants": payload.get("method_variants", []),
+                "summary_count": len(summaries),
+                "best_success_recovery_rate": max(
+                    (item.get("success_recovery_rate", 0.0) for item in summaries),
+                    default=0.0,
+                ),
+                "total_token_cost": sum(item.get("total_token_cost", 0) for item in summaries),
+            }
+        )
+        return entry
+
+    if strategy_report_path.exists():
+        payload = load_json(strategy_report_path)
+        summaries = payload.get("summaries", [])
+        entry.update(
+            {
+                "artifact_type": "strategy_comparison",
+                "strategies": payload.get("strategies", []),
+                "summary_count": len(summaries),
+                "best_strategy": payload.get("best_strategy"),
+                "best_success_recovery_rate": max(
+                    (item.get("success_recovery_rate", 0.0) for item in summaries),
+                    default=0.0,
+                ),
+            }
+        )
+        return entry
+
+    if corpus_manifest_path.exists():
+        payload = load_json(corpus_manifest_path)
+        summary_payload = load_json(corpus_summary_path) if corpus_summary_path.exists() else {}
+        entry.update(
+            {
+                "artifact_type": "corpus_manifest",
+                "name": payload.get("name", summary_payload.get("name", "")),
+                "domains": payload.get("domains", summary_payload.get("domains", [])),
+                "entry_count": payload.get("entry_count", summary_payload.get("entry_count", 0)),
+                "split_counts": payload.get("split_counts", summary_payload.get("split_counts", {})),
+            }
+        )
+        return entry
+
     if patch_summary_path.exists():
         payload = load_json(patch_summary_path)
         entry.update(
             {
                 "artifact_type": "patch_run",
+                "method_variant": payload.get(
+                    "method_variant", MethodVariant.PATCH_SEARCH_STRUCTURED.value
+                ),
                 "strategy": payload.get("strategy", ""),
                 "proposer_backend": payload.get(
                     "proposer_backend", ProposerBackend.DETERMINISTIC.value
@@ -3806,6 +4848,21 @@ def build_parser() -> argparse.ArgumentParser:
     corpus.add_argument("--limit-per-domain", type=int, default=100)
     corpus.add_argument("--output-dir", type=Path, default=Path("artifacts/corpus"))
 
+    synthetic_corpus = subparsers.add_parser(
+        "build-synthetic-corpus",
+        help="Collect synthetic benchmark failures across multiple domains into a corpus manifest.",
+    )
+    synthetic_corpus.add_argument("--name", default="synthetic_corpus")
+    synthetic_corpus.add_argument(
+        "--domains",
+        nargs="+",
+        choices=sorted(DOMAIN_LOADERS.keys()),
+        required=True,
+    )
+    synthetic_corpus.add_argument("--limit-per-domain", type=int, default=12)
+    synthetic_corpus.add_argument("--task-split", default="base")
+    synthetic_corpus.add_argument("--output-dir", type=Path, default=Path("artifacts/synthetic_corpus"))
+
     search = subparsers.add_parser("search-patches", help="Search patches for collected failures.")
     search.add_argument("--input-dir", type=Path, default=Path("artifacts/collect"))
     search.add_argument("--output-dir", type=Path, default=Path("artifacts/search"))
@@ -3895,6 +4952,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write lightweight patch_results.json files without replay trajectories.",
     )
 
+    baselines = subparsers.add_parser(
+        "run-baselines",
+        help="Run simple retry baselines over a saved failure corpus.",
+    )
+    baselines.add_argument("--input-dir", type=Path, required=True)
+    baselines.add_argument("--output-dir", type=Path, required=True)
+    baselines.add_argument(
+        "--method-variants",
+        nargs="+",
+        choices=[
+            MethodVariant.RETRY_FROM_SCRATCH.value,
+            MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value,
+            MethodVariant.RAW_CONTINUATION_FROM_SNAPSHOT.value,
+        ],
+        default=[
+            MethodVariant.RETRY_FROM_SCRATCH.value,
+            MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value,
+            MethodVariant.RAW_CONTINUATION_FROM_SNAPSHOT.value,
+        ],
+    )
+    baselines.add_argument("--strategy", default="heuristic")
+    baselines.add_argument("--max-evaluations", type=int, default=None)
+    baselines.add_argument("--continuation-horizon", type=int, default=3)
+    baselines.add_argument("--beam-width", type=int, default=2)
+    baselines.add_argument(
+        "--proposer-backend",
+        choices=[item.value for item in ProposerBackend],
+        default=ProposerBackend.OPENROUTER.value,
+    )
+    baselines.add_argument("--model-slug", default=None)
+    baselines.add_argument(
+        "--compact-results",
+        action="store_true",
+        help="Write lightweight patch_results.json files without replay trajectories.",
+    )
+
     batch = subparsers.add_parser(
         "run-batch",
         help="Run a saved experiment config over a failure corpus.",
@@ -3975,6 +5068,58 @@ def build_parser() -> argparse.ArgumentParser:
         help="Keep full replay trajectories inside patch_results.json instead of the compact paper-bundle default.",
     )
 
+    workshop_bundle = subparsers.add_parser(
+        "make-workshop-bundle",
+        help="Build the workshop-first artifact bundle with natural, synthetic, strict, retry, and oracle outputs.",
+    )
+    workshop_bundle.add_argument("--name", default="workshop_bundle")
+    workshop_bundle.add_argument(
+        "--natural-domain-specs",
+        nargs="+",
+        required=True,
+        help="Entries of the form domain::task_split::results_path",
+    )
+    workshop_bundle.add_argument("--natural-limit-per-domain", type=int, default=40)
+    workshop_bundle.add_argument(
+        "--synthetic-domains",
+        nargs="+",
+        choices=sorted(DOMAIN_LOADERS.keys()),
+        default=["retail", "airline"],
+    )
+    workshop_bundle.add_argument("--synthetic-limit-per-domain", type=int, default=12)
+    workshop_bundle.add_argument("--output-dir", type=Path, default=Path("artifacts/workshop_bundle"))
+    workshop_bundle.add_argument("--strict-strategy", default="heuristic")
+    workshop_bundle.add_argument("--strict-max-evaluations", type=int, default=None)
+    workshop_bundle.add_argument("--oracle-max-evaluations", type=int, default=None)
+    workshop_bundle.add_argument(
+        "--retry-method-variants",
+        nargs="+",
+        choices=[
+            MethodVariant.RETRY_FROM_SCRATCH.value,
+            MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value,
+            MethodVariant.RAW_CONTINUATION_FROM_SNAPSHOT.value,
+        ],
+        default=[
+            MethodVariant.RETRY_FROM_SCRATCH.value,
+            MethodVariant.RETRY_FROM_LOCALIZED_SNAPSHOT.value,
+            MethodVariant.RAW_CONTINUATION_FROM_SNAPSHOT.value,
+        ],
+    )
+    workshop_bundle.add_argument(
+        "--retry-proposer-backend",
+        choices=[item.value for item in ProposerBackend],
+        default=ProposerBackend.OPENROUTER.value,
+    )
+    workshop_bundle.add_argument("--retry-model-slug", default=None)
+    workshop_bundle.add_argument("--continuation-horizon", type=int, default=3)
+    workshop_bundle.add_argument("--beam-width", type=int, default=2)
+    workshop_bundle.add_argument("--max-candidates-per-step", type=int, default=None)
+    workshop_bundle.add_argument(
+        "--full-results",
+        action="store_true",
+        help="Keep full replay trajectories inside patch_results.json instead of the compact workshop-bundle default.",
+    )
+
     tables = subparsers.add_parser(
         "make-paper-tables",
         help="Build paper-facing result tables from saved patch outputs.",
@@ -4043,6 +5188,14 @@ def main() -> None:
             args.limit_per_domain,
             args.output_dir,
         )
+    elif args.command == "build-synthetic-corpus":
+        result = build_synthetic_corpus_cli(
+            args.name,
+            args.domains,
+            args.limit_per_domain,
+            args.output_dir,
+            args.task_split,
+        )
     elif args.command == "search-patches":
         result = search_patches_cli(
             args.input_dir,
@@ -4069,6 +5222,19 @@ def main() -> None:
             args.continuation_horizon,
             args.beam_width,
             args.max_candidates_per_step,
+            args.compact_results,
+        )
+    elif args.command == "run-baselines":
+        result = run_baselines_cli(
+            args.input_dir,
+            args.output_dir,
+            args.method_variants,
+            args.strategy,
+            args.max_evaluations,
+            args.proposer_backend,
+            args.model_slug,
+            args.continuation_horizon,
+            args.beam_width,
             args.compact_results,
         )
     elif args.command == "run-batch":
@@ -4108,6 +5274,25 @@ def main() -> None:
             max_candidates_per_step=args.max_candidates_per_step,
             proposer_backend=args.proposer_backend,
             model_slug=args.model_slug,
+            compact_results=not args.full_results,
+        )
+    elif args.command == "make-workshop-bundle":
+        result = make_workshop_bundle_cli(
+            name=args.name,
+            natural_domain_specs=args.natural_domain_specs,
+            natural_limit_per_domain=args.natural_limit_per_domain,
+            synthetic_domains=args.synthetic_domains,
+            synthetic_limit_per_domain=args.synthetic_limit_per_domain,
+            output_dir=args.output_dir,
+            strict_strategy=args.strict_strategy,
+            strict_max_evaluations=args.strict_max_evaluations,
+            oracle_max_evaluations=args.oracle_max_evaluations,
+            retry_method_variants=args.retry_method_variants,
+            retry_proposer_backend=args.retry_proposer_backend,
+            retry_model_slug=args.retry_model_slug,
+            continuation_horizon=args.continuation_horizon,
+            beam_width=args.beam_width,
+            max_candidates_per_step=args.max_candidates_per_step,
             compact_results=not args.full_results,
         )
     elif args.command == "make-paper-tables":

@@ -74,7 +74,8 @@ model, or ask the model to reflect and regenerate. These strategies can improve
 performance, but they are weak debugging tools: they do not cleanly isolate
 which intermediate decision actually caused failure, and they do not
 distinguish whether the real bottleneck is action selection, stale context,
-harmful state mutation, or continuation from a corrupted state.
+harmful state mutation, or continuation from a corrupted state
+\citep{tau_style,web_arena,work_arena,swe_bench,reflexion,self_refine,tree_of_thoughts}.
 
 This paper argues that replayable agent environments enable a stronger form of
 post-hoc analysis. If the environment state can be checkpointed and restored,
@@ -396,9 +397,8 @@ artifacts to a frozen corpus of hundreds of natural failures across at least
 \textit{retail} and \textit{airline}, while preserving the current split
 between synthetic localization analysis and natural ecological evaluation. The
 strongest version of the paper will also strengthen strict continuation, add
-model-backed proposal ablations, replace placeholder citations with exact
-bibliographic entries, and produce camera-ready figures directly from saved
-JSON artifacts.
+model-backed proposal ablations, verify and finalize the bibliography, and
+produce camera-ready figures directly from saved JSON artifacts.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
