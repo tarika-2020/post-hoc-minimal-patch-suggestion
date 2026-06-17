@@ -366,6 +366,27 @@ class Tau3PrototypeTests(unittest.TestCase):
             self.assertTrue((guide_dir / "artifact_manifest.json").exists())
             self.assertTrue((guide_dir / "ARTIFACT_README.md").exists())
 
+    def test_compact_search_results_omit_patched_trajectory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            collect_dir = root / "collect"
+            search_dir = root / "search"
+            report_path = root / "autopsy.json"
+            collect_failures_cli("retail", "base", 1, collect_dir)
+            summary = search_patches_cli(
+                collect_dir,
+                search_dir,
+                compact_results=True,
+            )
+            self.assertTrue(summary["compact_results"])
+            payload = json.loads((search_dir / "patch_results.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(payload), 1)
+            self.assertEqual(payload[0]["serialization_mode"], "compact")
+            for evaluation in payload[0]["evaluated_candidates"]:
+                self.assertNotIn("patched_trajectory", evaluation)
+            report = report_autopsy_cli(search_dir, report_path)
+            self.assertEqual(report["case_count"], 1)
+
     def test_make_case_studies_cli(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -560,6 +581,13 @@ class Tau3PrototypeTests(unittest.TestCase):
             self.assertTrue((bundle_dir / "strict_search" / "patch_results.json").exists())
             self.assertTrue((bundle_dir / "oracle_upper_bound" / "patch_results.json").exists())
             self.assertTrue((bundle_dir / "paper_tables" / "paper_tables.md").exists())
+            strict_payload = json.loads(
+                (bundle_dir / "strict_search" / "patch_results.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(strict_payload)
+            self.assertEqual(strict_payload[0]["serialization_mode"], "compact")
+            for evaluation in strict_payload[0]["evaluated_candidates"]:
+                self.assertNotIn("patched_trajectory", evaluation)
 
 
 if __name__ == "__main__":

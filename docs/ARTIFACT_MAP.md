@@ -137,6 +137,10 @@ Current best mixed-domain saved bundle for the paper narrative.
 - Per-domain result: `airline = 10 / 16`, `retail = 3 / 16`
 - Oracle result on this slice: `13 / 32` recovered
 - Current role: strongest clean mixed-domain natural bundle in the repo
+- Search-result note: newer paper bundles default to compact
+  `patch_results.json` serialization, so per-candidate
+  `patched_trajectory` payloads are omitted unless full debug output is
+  requested
 - Key files:
   [paper_bundle_summary.json](../artifacts/paper_bundle_multimodel_32/paper_bundle_summary.json),
   [strict_autopsy_report.json](../artifacts/paper_bundle_multimodel_32/strict_autopsy_report.json),

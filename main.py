@@ -150,6 +150,7 @@ class ExperimentConfig:
     include_oracle_suffix: bool = False
     proposer_backend: str = ProposerBackend.DETERMINISTIC.value
     model_slug: str | None = None
+    compact_results: bool = False
     budget: BudgetConfig = field(default_factory=BudgetConfig)
 
 
@@ -256,6 +257,26 @@ def save_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, default=serialize_dataclass)
+
+
+def serialize_patch_search_result(
+    result: PatchSearchResult,
+    compact: bool = False,
+) -> JsonDict:
+    payload = asdict(result)
+    if not compact:
+        return payload
+    for evaluation in payload.get("evaluated_candidates", []):
+        evaluation.pop("patched_trajectory", None)
+    payload["serialization_mode"] = "compact"
+    return payload
+
+
+def serialize_patch_search_results(
+    results: list[PatchSearchResult],
+    compact: bool = False,
+) -> list[JsonDict]:
+    return [serialize_patch_search_result(result, compact=compact) for result in results]
 
 
 def save_csv(path: Path, rows: list[JsonDict], fieldnames: list[str]) -> None:
@@ -2475,6 +2496,7 @@ def search_patches_cli(
     continuation_horizon: int = 3,
     beam_width: int = 2,
     max_candidates_per_step: int | None = None,
+    compact_results: bool = False,
 ) -> JsonDict:
     failures_payload = load_json(input_dir / "failures.json")
     failures = reconstruct_failures(failures_payload)
@@ -2483,6 +2505,7 @@ def search_patches_cli(
             "strategy": strategy,
             "include_oracle_suffix": include_oracle_suffix,
             "proposer_backend": proposer_backend,
+            "compact_results": compact_results,
             "failure_count": 0,
             "recovered_count": 0,
             "success_recovery_rate": 0.0,
@@ -2556,6 +2579,7 @@ def search_patches_cli(
         "beam_width": beam_width,
         "evaluated_candidate_count": evaluated_candidate_count,
         "evaluated_family_counts": dict(sorted(evaluated_family_counts.items())),
+        "compact_results": compact_results,
         "average_patch_size": (
             sum(recovered_patch_sizes) / len(recovered_patch_sizes)
             if recovered_patch_sizes
@@ -2565,7 +2589,10 @@ def search_patches_cli(
         "p90_token_cost": percentile(token_costs, 0.9),
         **localization_metrics,
     }
-    save_json(output_dir / "patch_results.json", results)
+    save_json(
+        output_dir / "patch_results.json",
+        serialize_patch_search_results(results, compact=compact_results),
+    )
     save_json(output_dir / "patch_summary.json", summary)
     return summary
 
@@ -2581,6 +2608,7 @@ def compare_strategies_cli(
     continuation_horizon: int = 3,
     beam_width: int = 2,
     max_candidates_per_step: int | None = None,
+    compact_results: bool = False,
 ) -> JsonDict:
     strategy_summaries: list[JsonDict] = []
     for strategy in strategies:
@@ -2596,6 +2624,7 @@ def compare_strategies_cli(
             continuation_horizon,
             beam_width,
             max_candidates_per_step,
+            compact_results,
         )
         strategy_summaries.append(summary)
     best = max(
@@ -2612,6 +2641,7 @@ def compare_strategies_cli(
         "include_oracle_suffix": include_oracle_suffix,
         "proposer_backend": proposer_backend,
         "model_slug": model_slug,
+        "compact_results": compact_results,
         "best_strategy": best["strategy"] if best else None,
         "summaries": strategy_summaries,
     }
@@ -2914,6 +2944,7 @@ def make_paper_bundle_cli(
     max_candidates_per_step: int | None = None,
     proposer_backend: str = ProposerBackend.DETERMINISTIC.value,
     model_slug: str | None = None,
+    compact_results: bool = True,
 ) -> JsonDict:
     corpus_dir = output_dir / "corpus"
     strict_dir = output_dir / "strict_search"
@@ -2935,6 +2966,7 @@ def make_paper_bundle_cli(
         continuation_horizon=continuation_horizon,
         beam_width=beam_width,
         max_candidates_per_step=max_candidates_per_step,
+        compact_results=compact_results,
     )
     strict_autopsy = report_autopsy_cli(strict_dir, strict_autopsy_path)
     oracle_summary = search_patches_cli(
@@ -2948,6 +2980,7 @@ def make_paper_bundle_cli(
         continuation_horizon=continuation_horizon,
         beam_width=beam_width,
         max_candidates_per_step=max_candidates_per_step,
+        compact_results=compact_results,
     )
     oracle_autopsy = report_autopsy_cli(oracle_dir, oracle_autopsy_path)
     figure_report = make_figures_cli([strict_dir, oracle_dir], figures_dir)
@@ -2965,6 +2998,7 @@ def make_paper_bundle_cli(
         "max_candidates_per_step": max_candidates_per_step,
         "proposer_backend": proposer_backend,
         "model_slug": model_slug,
+        "compact_results": compact_results,
         "corpus_summary": corpus_summary,
         "strict_summary": strict_summary,
         "strict_autopsy": strict_autopsy,
@@ -3001,6 +3035,7 @@ def run_batch_cli(
         include_oracle_suffix=payload.get("include_oracle_suffix", False),
         proposer_backend=payload.get("proposer_backend", ProposerBackend.DETERMINISTIC.value),
         model_slug=payload.get("model_slug"),
+        compact_results=payload.get("compact_results", False),
         budget=budget,
     )
     target_output_dir = output_dir or Path(config.output_dir)
@@ -3015,6 +3050,7 @@ def run_batch_cli(
         continuation_horizon=config.budget.continuation_horizon,
         beam_width=config.budget.beam_width,
         max_candidates_per_step=config.budget.max_candidates_per_step,
+        compact_results=config.compact_results,
     )
     save_json(target_output_dir / "experiment_config.json", config)
     return summary
@@ -3027,6 +3063,7 @@ def sweep_budget_cli(
     evaluation_budgets: list[int],
     proposer_backend: str = ProposerBackend.DETERMINISTIC.value,
     model_slug: str | None = None,
+    compact_results: bool = False,
 ) -> JsonDict:
     rows: list[JsonDict] = []
     for budget_value in evaluation_budgets:
@@ -3039,6 +3076,7 @@ def sweep_budget_cli(
             include_oracle_suffix=False,
             proposer_backend=proposer_backend,
             model_slug=model_slug,
+            compact_results=compact_results,
         )
         rows.append(
             {
@@ -3054,6 +3092,7 @@ def sweep_budget_cli(
     return {
         "strategy": strategy,
         "proposer_backend": proposer_backend,
+        "compact_results": compact_results,
         "points": rows,
     }
 
@@ -3064,6 +3103,7 @@ def sweep_models_cli(
     strategy: str,
     model_slugs: list[str],
     max_evaluations: int | None = None,
+    compact_results: bool = False,
 ) -> JsonDict:
     rows: list[JsonDict] = []
     for model_slug in model_slugs:
@@ -3075,6 +3115,7 @@ def sweep_models_cli(
             max_evaluations=max_evaluations,
             proposer_backend=ProposerBackend.OPENROUTER.value,
             model_slug=model_slug,
+            compact_results=compact_results,
         )
         rows.append(
             {
@@ -3087,7 +3128,11 @@ def sweep_models_cli(
     save_json(output_dir / "model_sweep.json", rows)
     if rows:
         save_csv(output_dir / "model_sweep.csv", rows, list(rows[0].keys()))
-    return {"strategy": strategy, "models": rows}
+    return {
+        "strategy": strategy,
+        "compact_results": compact_results,
+        "models": rows,
+    }
 
 
 def make_figures_cli(
@@ -3795,6 +3840,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Strict replay remains the default."
         ),
     )
+    search.add_argument(
+        "--compact-results",
+        action="store_true",
+        help="Omit per-candidate replay trajectories from patch_results.json to keep large runs lightweight.",
+    )
 
     compare = subparsers.add_parser(
         "compare-strategies",
@@ -3839,6 +3889,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run strategy comparison with the oracle continuation upper-bound enabled.",
     )
+    compare.add_argument(
+        "--compact-results",
+        action="store_true",
+        help="Write lightweight patch_results.json files without replay trajectories.",
+    )
 
     batch = subparsers.add_parser(
         "run-batch",
@@ -3861,6 +3916,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=ProposerBackend.DETERMINISTIC.value,
     )
     sweep_budget.add_argument("--model-slug", default=None)
+    sweep_budget.add_argument(
+        "--compact-results",
+        action="store_true",
+        help="Write lightweight patch_results.json files without replay trajectories.",
+    )
 
     sweep_models = subparsers.add_parser(
         "sweep-models",
@@ -3871,6 +3931,11 @@ def build_parser() -> argparse.ArgumentParser:
     sweep_models.add_argument("--strategy", default="heuristic")
     sweep_models.add_argument("--model-slugs", nargs="+", required=True)
     sweep_models.add_argument("--max-evaluations", type=int, default=None)
+    sweep_models.add_argument(
+        "--compact-results",
+        action="store_true",
+        help="Write lightweight patch_results.json files without replay trajectories.",
+    )
 
     figures = subparsers.add_parser(
         "make-figures",
@@ -3904,6 +3969,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=ProposerBackend.DETERMINISTIC.value,
     )
     bundle.add_argument("--model-slug", default=None)
+    bundle.add_argument(
+        "--full-results",
+        action="store_true",
+        help="Keep full replay trajectories inside patch_results.json instead of the compact paper-bundle default.",
+    )
 
     tables = subparsers.add_parser(
         "make-paper-tables",
@@ -3985,6 +4055,7 @@ def main() -> None:
             args.continuation_horizon,
             args.beam_width,
             args.max_candidates_per_step,
+            args.compact_results,
         )
     elif args.command == "compare-strategies":
         result = compare_strategies_cli(
@@ -3998,6 +4069,7 @@ def main() -> None:
             args.continuation_horizon,
             args.beam_width,
             args.max_candidates_per_step,
+            args.compact_results,
         )
     elif args.command == "run-batch":
         result = run_batch_cli(args.config, args.output_dir)
@@ -4009,6 +4081,7 @@ def main() -> None:
             args.evaluation_budgets,
             args.proposer_backend,
             args.model_slug,
+            args.compact_results,
         )
     elif args.command == "sweep-models":
         result = sweep_models_cli(
@@ -4017,6 +4090,7 @@ def main() -> None:
             args.strategy,
             args.model_slugs,
             args.max_evaluations,
+            args.compact_results,
         )
     elif args.command == "make-figures":
         result = make_figures_cli(args.input_dirs, args.output_dir)
@@ -4034,6 +4108,7 @@ def main() -> None:
             max_candidates_per_step=args.max_candidates_per_step,
             proposer_backend=args.proposer_backend,
             model_slug=args.model_slug,
+            compact_results=not args.full_results,
         )
     elif args.command == "make-paper-tables":
         result = make_paper_tables_cli(args.input_dirs, args.output_dir)

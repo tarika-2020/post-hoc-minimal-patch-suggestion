@@ -71,6 +71,9 @@ Important grounding note:
 - A one-command paper bundle path now exists for smoke runs:
   build corpus, run strict search, run oracle upper bound, aggregate autopsies,
   export figure data, and render paper tables from one CLI entrypoint.
+- Paper-bundle and batch runs now default to compact `patch_results.json`
+  serialization, dropping per-candidate `patched_trajectory` payloads unless
+  full debug output is explicitly requested.
 - A clean saved bundle now exists at `artifacts/paper_bundle_multimodel_32`,
   giving a stronger mixed-domain natural evidence point than the older
   one-plus-one smoke, six-case, and sixteen-case bundles.
@@ -140,6 +143,8 @@ Run a saved batch experiment:
 python main.py run-batch --config configs/paper_batch_template.json
 ```
 
+The provided paper batch template enables `compact_results` by default.
+
 Run the natural-failure oracle-continuation upper bound:
 
 ```powershell
@@ -202,6 +207,7 @@ The canonical bundle outputs are:
 
 - `corpus/corpus_manifest.json`
 - `strict_search/patch_summary.json`
+- `strict_search/patch_results.json` in compact mode by default
 - `oracle_upper_bound/patch_summary.json`
 - `strict_autopsy_report.json`
 - `oracle_autopsy_report.json`

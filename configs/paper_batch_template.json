@@ -6,6 +6,7 @@
   "include_oracle_suffix": false,
   "proposer_backend": "deterministic",
   "model_slug": null,
+  "compact_results": true,
   "budget": {
     "max_evaluations_per_failure": 4,
     "max_candidates_per_step": 6,

@@ -125,6 +125,9 @@ The safest concrete statement today is:
 For GitHub, only the curated paper-facing summaries, tables, autopsies, and
 case-study artifacts are intended to be tracked. The multi-GB raw replay dumps
 and imported benchmark data stay local and are excluded via `.gitignore`.
+Paper-bundle and batch runs now also support compact `patch_results.json`
+serialization so we do not save full per-candidate patched trajectories unless
+we explicitly request full debug output.
 
 ## Implemented Method
 
@@ -542,6 +545,8 @@ Run a saved experiment config:
 python main.py run-batch --config configs/paper_batch_template.json
 ```
 
+The default paper batch template sets `compact_results = true`.
+
 Sweep budget or model settings:
 
 ```powershell
@@ -629,10 +634,15 @@ python main.py make-paper-bundle `
   --max-candidates-per-step 1
 ```
 
+`make-paper-bundle` now writes compact search results by default. Pass
+`--full-results` only when you need every evaluated candidate's full patched
+trajectory for debugging.
+
 The bundle writes:
 
 - `corpus/corpus_manifest.json` and `corpus/failures.json`
 - `strict_search/patch_summary.json`
+- `strict_search/patch_results.json` in compact mode by default
 - `oracle_upper_bound/patch_summary.json`
 - `strict_autopsy_report.json` and `oracle_autopsy_report.json`
 - `figures/figure_manifest.json`
