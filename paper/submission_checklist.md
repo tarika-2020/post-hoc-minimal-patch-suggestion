@@ -38,7 +38,7 @@ artifacts, and commands already present in the repository.
 | Strict non-oracle natural recovery | `in_progress` | [artifacts/natural_runtime_smoke_autopsy.json](../artifacts/natural_runtime_smoke_autopsy.json), [artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json](../artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json), [artifacts/paper_bundle_multimodel_32/strict_autopsy_report.json](../artifacts/paper_bundle_multimodel_32/strict_autopsy_report.json) | Demonstrate on a much larger natural corpus |
 | Oracle continuation upper bound | `done` | [artifacts/natural_oracle_suffix_search/patch_summary.json](../artifacts/natural_oracle_suffix_search/patch_summary.json) | Keep explicitly separate from main claim |
 | Synthetic localization metrics | `done` | [artifacts/synthetic_strategy_tables_3/synthetic_localization_results.csv](../artifacts/synthetic_strategy_tables_3/synthetic_localization_results.csv) | Scale beyond the current three-case controlled corpus |
-| Frozen workshop natural corpus (`80`) | `done` | [corpus_manifest.json](../artifacts/workshop_bundle_release/natural_corpus/corpus_manifest.json) | Finish downstream search/report generation |
+| Frozen workshop natural corpus (`80`) | `done` | [corpus_manifest.json](../artifacts/workshop_bundle_release/natural_corpus/corpus_manifest.json), [failures_manifest.json](../artifacts/workshop_bundle_release/natural_corpus/failures_manifest.json), [failures.jsonl](../artifacts/workshop_bundle_release/natural_corpus/failures.jsonl) | Finish downstream search/report generation |
 | Frozen workshop synthetic corpus (`24`) | `done` | [summary.json](../artifacts/workshop_bundle_release/synthetic_corpus/summary.json) | Finish downstream comparison/report generation |
 | Secret hygiene for hosted runs | `in_progress` | [submission_checklist.md](./submission_checklist.md) | Keep `OPENROUTER_API_KEY` out of tracked files and load it only from the environment |
 
@@ -57,7 +57,7 @@ artifacts, and commands already present in the repository.
 
 | Artifact | Status | Current Evidence / Path | Remaining Work |
 | --- | --- | --- | --- |
-| Workshop short-paper tables and figure CSVs | `in_progress` | Frozen corpora in [artifacts/workshop_bundle_release](../artifacts/workshop_bundle_release), resume runner in [scripts/resume_workshop_release.py](../scripts/resume_workshop_release.py) | Let the release runner finish and point the short paper at the saved outputs |
+| Workshop short-paper tables and figure CSVs | `in_progress` | Frozen corpora in [artifacts/workshop_bundle_release](../artifacts/workshop_bundle_release), resumable JSONL outputs in [oracle_upper_bound](../artifacts/workshop_bundle_release/oracle_upper_bound), resume runner in [scripts/resume_workshop_release.py](../scripts/resume_workshop_release.py) | Let the clean reruns finish and point the short paper at the saved outputs |
 | Synthetic localization table | `done` | [synthetic_localization_results.csv](../artifacts/synthetic_strategy_tables_3/synthetic_localization_results.csv) | Scale to larger synthetic corpus |
 | Main smoke result tables | `done` | [paper_tables.md](../artifacts/synthetic_strategy_tables_3/paper_tables.md), [paper_tables.md](../artifacts/paper_bundle_smoke_cli/paper_tables/paper_tables.md) | Produce final paper tables from full runs |
 | Figure-ready CSV data | `done` | [figure_data.csv](../artifacts/synthetic_strategy_figures_3/figure_data.csv) | Turn into camera-ready plots |
@@ -72,6 +72,9 @@ artifacts, and commands already present in the repository.
 | --- | --- | --- | --- |
 | Workshop bundle CLI path | `done` | [main.py](../main.py), [workshop_paper.tex](./workshop_paper.tex) | None beyond final artifact completion |
 | Workshop release resume path | `done` | [resume_workshop_release.py](../scripts/resume_workshop_release.py) | Monitor the long-running bundle and refresh docs once outputs land |
+| Streaming large-corpus failure loading | `done` | [main.py](../main.py) | None beyond long-run monitoring |
+| JSONL + sharded corpus artifacts | `done` | [failures_manifest.json](../artifacts/workshop_bundle_release/natural_corpus/failures_manifest.json), [failure_shards](../artifacts/workshop_bundle_release/natural_corpus/failure_shards) | Backfill older corpora only if needed |
+| Incremental resumable patch-result writes | `done` | [patch_results.jsonl](../artifacts/workshop_bundle_release/oracle_upper_bound/patch_results.jsonl), [patch_summary.progress.json](../artifacts/workshop_bundle_release/oracle_upper_bound/patch_summary.progress.json), [main.py](../main.py) | Let canonical workshop reruns complete |
 | One-command smoke bundle | `done` | [paper_bundle_summary.json](../artifacts/paper_bundle_smoke_cli/paper_bundle_summary.json) | Keep stable while scaling |
 | Saved paper-facing tables | `done` | [artifacts/paper_bundle_smoke_cli/paper_tables/paper_tables.json](../artifacts/paper_bundle_smoke_cli/paper_tables/paper_tables.json) | Produce full-run versions |
 | Saved autopsy reports | `done` | [artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json](../artifacts/paper_bundle_smoke_cli/strict_autopsy_report.json) | Curate final examples |
@@ -80,13 +83,26 @@ artifacts, and commands already present in the repository.
 
 ## High-Priority Next Actions
 
-1. Freeze the workshop corpora for `retail + airline` and run `make-workshop-bundle`.
-2. Finish strict non-oracle search, oracle upper bound, synthetic strategy comparison, and budget sweep under [artifacts/workshop_bundle_release](../artifacts/workshop_bundle_release).
-3. Run the hosted retry baselines safely:
+1. Let the clean canonical oracle rerun finish under [oracle_upper_bound](../artifacts/workshop_bundle_release/oracle_upper_bound) and then regenerate [oracle_autopsy_report.json](../artifacts/workshop_bundle_release/oracle_autopsy_report.json).
+2. Refresh the hosted retry baselines on the new resumable JSONL path so their artifacts are comparable with the regenerated oracle run.
+3. Finish strict non-oracle search, synthetic strategy comparison, and budget sweep under [artifacts/workshop_bundle_release](../artifacts/workshop_bundle_release).
+4. Run the hosted retry baselines safely:
    use `OPENROUTER_API_KEY` from the environment only, and keep free-model runs within the documented OpenRouter daily cap unless credits are added.
-4. Export final workshop tables and figure CSVs from those saved runs.
-5. Curate 3 workshop case studies and update the short paper with the saved artifact numbers.
-6. Compile the LaTeX manuscript with the official workshop style once the template file is available locally.
+5. Export final workshop tables and figure CSVs from those saved runs.
+6. Curate 3 workshop case studies and update the short paper with the saved artifact numbers.
+7. Compile the LaTeX manuscript with the official workshop style once the template file is available locally.
+
+## Live Run Notes
+
+- Clean workshop oracle rerun is active in [oracle_upper_bound](../artifacts/workshop_bundle_release/oracle_upper_bound).
+- Old invalid oracle outputs were archived under:
+  [oracle_upper_bound_invalid_pre_cf842a7_20260618_112802](../artifacts/workshop_bundle_release/oracle_upper_bound_invalid_pre_cf842a7_20260618_112802)
+  and
+  [oracle_autopsy_report_invalid_pre_cf842a7_20260618_112802.json](../artifacts/workshop_bundle_release/oracle_autopsy_report_invalid_pre_cf842a7_20260618_112802.json).
+- Current resumable progress files are:
+  [patch_results.jsonl](../artifacts/workshop_bundle_release/oracle_upper_bound/patch_results.jsonl)
+  and
+  [patch_summary.progress.json](../artifacts/workshop_bundle_release/oracle_upper_bound/patch_summary.progress.json).
 
 ## Canonical Current Artifacts
 
