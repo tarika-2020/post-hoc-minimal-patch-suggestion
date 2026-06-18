@@ -19,8 +19,10 @@
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{url}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 
-\title{Execution Intervention for Post-Hoc Debugging of LLM Agent Trajectories}
+\title{Minimal Execution Patches for Causal Debugging of Tool-Using Agents}
 
 \author{Anonymous Workshop Submission}
 
@@ -78,7 +80,45 @@ checkpointed replay, structured patch families, bounded search cost, and
 autopsy generation, together with a now-frozen workshop corpus over saved
 tau-style failures in retail and airline domains.
 
+Existing work mostly predicts or explains where an agent failed from traces. We
+instead search for the smallest executable intervention that causally flips the
+benchmark outcome under replay, yielding both a repair and a root-cause
+autopsy. That difference matters: our unit of analysis is not only a suspect
+step, but a benchmark-native reward flip produced by checkpointed replay,
+minimal patch size, explicit search-cost accounting, and strict non-oracle
+continuation after the intervention.
+
 \section{Method}
+
+\begin{figure}[t]
+\centering
+\fbox{%
+\parbox{0.96\linewidth}{%
+\small
+\textbf{Failed trace}
+$\rightarrow$
+\textbf{restore ranked snapshot}
+$\rightarrow$
+\textbf{propose structured patch}
+$\rightarrow$
+\textbf{replay under strict continuation}
+$\rightarrow$
+\textbf{benchmark evaluator}
+$\rightarrow$
+\textbf{minimal successful patch}
+$\rightarrow$
+\textbf{autopsy report}
+
+\medskip
+The key distinction is executable counterfactual repair: we intervene on saved
+environment state, not only on textual explanations of the trace.
+}%
+}
+\caption{Replayable execution intervention treats a failed agent trajectory as a
+stateful program that can be paused, patched, replayed, and scored by the
+original benchmark evaluator.}
+\label{fig:execution_intervention_pipeline}
+\end{figure}
 
 For a failed trajectory, we log per-step prompt context, chosen action, tool
 result, and pre/post execution snapshots. A patch candidate specifies a target
@@ -89,6 +129,31 @@ step, a patch family, and a small structured payload. Applying a patch means:
   \item resume execution under a bounded continuation policy;
   \item evaluate the replayed rollout with the original benchmark evaluator.
 \end{enumerate}
+
+\begin{algorithm}[t]
+\caption{Minimal Patch Recovery via Checkpointed Replay}
+\label{alg:minimal_patch_recovery}
+\begin{algorithmic}[1]
+\Require failed trajectory $\tau$, ranked steps $\mathcal{T}$, patch families $\mathcal{F}$, search budget $B$
+\State $p^\star \gets \varnothing$
+\For{$t \in \mathcal{T}$ in ranked order}
+  \State restore the saved pre-step snapshot at step $t$
+  \For{$f \in \mathcal{F}$}
+    \For{$p \in \textsc{ProposePatches}(\tau, t, f, B)$}
+      \State replay from the restored snapshot with patch $p$
+      \State continue under a bounded strict continuation policy
+      \State evaluate the replayed rollout with the benchmark reward
+      \If{$R(\tau'(p)) = 1$}
+        \If{$p^\star = \varnothing$ or $p$ is smaller/cheaper than $p^\star$}
+          \State $p^\star \gets p$
+        \EndIf
+      \EndIf
+    \EndFor
+  \EndFor
+\EndFor
+\State \Return winning patch $p^\star$ and its autopsy report, or \texttt{not recovered}
+\end{algorithmic}
+\end{algorithm}
 
 The current system supports structured intervention families including tool
 argument edits, tool-call replacement, insertion, deletion, context edits, and
@@ -115,6 +180,15 @@ failure, the system must continue from the replayed state without reusing
 oracle future actions. Oracle continuation is retained only as an upper-bound
 analysis.
 
+The workshop comparison frame is methodology-first with early real-environment
+evidence rather than benchmark-scale repair claims. The intended ablation set
+includes no repair, random candidate / random localization, reverse search,
+tool-deletion-only search, continuation-replacement-only search, and the
+oracle suffix upper bound. The corpus scale has already moved from the earlier
+thirty-two-case smoke setting to a frozen $80$-case natural corpus, while the
+final artifact-backed workshop tables are still being regenerated from those
+saved failures.
+
 The codebase now supports the full workshop artifact path: building natural and
 synthetic corpora, running structured patch search, running retry baselines,
 exporting tables and figure CSVs, and generating reviewer-facing artifact
@@ -123,6 +197,27 @@ failure corpora so the frozen workshop release can be regenerated without
 eagerly materializing a multi-gigabyte corpus in memory. In the current repo
 state, the corpus freeze is complete while the final downstream result bundle
 is still being regenerated from those frozen artifacts.
+
+\subsection*{Concrete Autopsy Example}
+
+One representative recovered retail case starts with an incorrect identity
+lookup:
+\begin{quote}
+\small\ttfamily
+find\_user\_id\_by\_email(email="aarav.santos8321@example.com")
+\end{quote}
+The minimal successful patch changes only the email string:
+\begin{quote}
+\small\ttfamily
+find\_user\_id\_by\_email(email="aarav.santos8320@example.com")
+\end{quote}
+From that patched snapshot, strict replay with a bounded continuation proposal
+reaches a successful rollout. This example is useful because it isolates the
+paper's target behavior: a tiny executable patch flips the benchmark reward,
+while the recovered rollout simultaneously serves as a causal autopsy. In
+contrast, some airline recoveries are even smaller and succeed by deleting a
+harmful mutating action altogether, showing that both continuation-style repair
+and deletion-style repair appear in natural failures.
 
 \section{Related Work}
 
@@ -133,19 +228,27 @@ post-hoc repair or deliberation methods for language models.
 Recent benchmarks such as tau-style environments, WebArena, WorkArena,
 AgentDojo, and SWE-bench make agent execution state, tools, and outcome
 evaluation central to the task definition
-\citep{tau_style,web_arena,work_arena,agentdojo,swe_bench}. These benchmarks
+\citep{tau_style,web_arena,work_arena,agent_dojo,swe_bench}. These benchmarks
 are valuable because they expose realistic multi-step failures. Our goal is not
 to propose another benchmark, but to turn benchmark trajectories into
 debuggable execution objects by adding checkpointed intervention and replay.
 
-\paragraph{Reflection and repair for language models.}
-Methods such as Reflexion, Self-Refine, and Tree of Thoughts improve behavior
-through critique, self-correction, or explicit search
-\citep{reflexion,self_refine,tree_of_thoughts}. These methods usually operate
-in prompt space: they ask the model to revise, deliberate, or retry. Our
-setting is different. We intervene on replayable execution state and score each
-intervention by whether it causally flips the benchmark outcome. This makes the
-resulting repair more directly tied to an identifiable state change.
+\paragraph{Reasoning, reflection, and retry.}
+ReAct established the interleaved reasoning-and-acting trajectory format that
+many later agent systems and benchmarks inherit \citep{react}. Methods such as
+Reflexion, Self-Refine, and Tree of Thoughts improve behavior through critique,
+self-correction, or explicit search \citep{reflexion,self_refine,tree_of_thoughts}.
+These methods usually operate in prompt space: they revise, deliberate, or
+retry, but they do not center the search for the smallest executable patch that
+changes the replayed benchmark outcome.
+
+\paragraph{Intervention-supported attribution.}
+The closest recent threat is REFLECT, which also uses intervention-supported
+replay to strengthen attribution for silent failures in agent traces
+\citep{reflect}. Our emphasis is narrower and more repair-oriented: we search
+over explicit patch families, require benchmark-native reward flipping under
+strict non-oracle continuation, and report patch minimality plus search cost as
+first-class outputs alongside the autopsy.
 
 \paragraph{Program repair and debugging perspective.}
 The closest conceptual analogy is automated debugging or program repair, where
@@ -153,7 +256,9 @@ one searches for a small change that fixes downstream behavior. Our setting is
 harder in some ways because the trajectory mixes language, tool calls, and
 mutable environment state. At the same time, benchmark-native replay gives us a
 clean reward signal and exact state restoration, which makes causal debugging
-practical.
+practical. This connects our workshop framing to classical fault localization,
+delta debugging, automated program repair, and minimal counterfactual
+explanations \citep{fault_localization,delta_debugging,program_repair,minimal_counterfactuals}.
 
 \section{Current Contribution}
 
