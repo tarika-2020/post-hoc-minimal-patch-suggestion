@@ -333,6 +333,18 @@ def normalize_task_split(task_split: str) -> str:
     return aliases.get(normalized, normalized)
 
 
+def normalize_action_requestor(value: Any, default: str = "assistant") -> str:
+    normalized = str(value or default).strip().lower()
+    aliases = {
+        "agent": "assistant",
+        "model": "assistant",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in {"assistant", "user"}:
+        return default
+    return normalized
+
+
 class Tau3DomainAdapter:
     def __init__(self, domain: str, task_split: str = "base") -> None:
         if domain not in DOMAIN_LOADERS:
@@ -738,7 +750,7 @@ def extract_actions_from_messages(task_id: str, messages: list[JsonDict]) -> lis
             actions.append(
                 TauAction(
                     action_id=f"{task_id}_natural_{len(actions)}",
-                    requestor=tool_call.get("requestor") or message["role"],
+                    requestor=normalize_action_requestor(tool_call.get("requestor") or message["role"]),
                     name=tool_call["name"],
                     arguments=copy.deepcopy(tool_call.get("arguments") or {}),
                 )
@@ -749,7 +761,7 @@ def extract_actions_from_messages(task_id: str, messages: list[JsonDict]) -> lis
 def action_from_payload(payload: JsonDict) -> TauAction:
     return TauAction(
         action_id=str(payload.get("action_id") or f"replayed_{payload.get('name', 'action')}"),
-        requestor=str(payload["requestor"]),
+        requestor=normalize_action_requestor(payload.get("requestor")),
         name=str(payload["name"]),
         arguments=copy.deepcopy(payload.get("arguments") or {}),
     )
@@ -938,7 +950,7 @@ class DeterministicProposer(BaseProposer):
     def _make_action(task_id: str, requestor: str, index: int, name: str, arguments: JsonDict) -> JsonDict:
         return {
             "action_id": f"{task_id}_continuation_{index}",
-            "requestor": requestor,
+            "requestor": normalize_action_requestor(requestor),
             "name": name,
             "arguments": copy.deepcopy(arguments),
             "info": None,
@@ -1297,7 +1309,7 @@ class DeterministicProposer(BaseProposer):
             if not isinstance(action, dict):
                 continue
             name = action.get("name")
-            requestor = action.get("requestor", patched_action["requestor"])
+            requestor = normalize_action_requestor(action.get("requestor", patched_action["requestor"]))
             arguments = action.get("arguments", {})
             if not isinstance(name, str) or not isinstance(arguments, dict):
                 continue
@@ -1446,7 +1458,7 @@ class OpenRouterProposer(BaseProposer):
             if not isinstance(action, dict):
                 continue
             name = action.get("name")
-            action_requestor = action.get("requestor", requestor)
+            action_requestor = normalize_action_requestor(action.get("requestor", requestor))
             arguments = action.get("arguments", {})
             if not isinstance(name, str) or not isinstance(arguments, dict):
                 continue
