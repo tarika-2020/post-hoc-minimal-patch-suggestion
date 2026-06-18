@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from importlib import metadata as importlib_metadata
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -300,6 +300,58 @@ def save_csv(path: Path, rows: list[JsonDict], fieldnames: list[str]) -> None:
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def iter_json_array(path: Path, chunk_size: int = 1024 * 1024) -> Iterator[Any]:
+    decoder = json.JSONDecoder()
+    with path.open("r", encoding="utf-8") as handle:
+        buffer = ""
+        started = False
+        finished = False
+        while not finished:
+            chunk = handle.read(chunk_size)
+            if chunk:
+                buffer += chunk
+            elif not buffer.strip():
+                break
+            parse_again = True
+            while parse_again:
+                parse_again = False
+                buffer = buffer.lstrip()
+                if not started:
+                    if not buffer:
+                        break
+                    if buffer[0] != "[":
+                        raise ValueError(f"{path} does not contain a top-level JSON array.")
+                    started = True
+                    buffer = buffer[1:]
+                    parse_again = True
+                    continue
+                if not buffer:
+                    break
+                if buffer[0] == ",":
+                    buffer = buffer[1:]
+                    parse_again = True
+                    continue
+                if buffer[0] == "]":
+                    finished = True
+                    buffer = buffer[1:]
+                    break
+                try:
+                    item, end_index = decoder.raw_decode(buffer)
+                except json.JSONDecodeError:
+                    if chunk:
+                        break
+                    raise
+                yield item
+                buffer = buffer[end_index:]
+                parse_again = True
+        if not started:
+            return
+        if buffer.strip():
+            tail = buffer.strip()
+            if tail not in {"", "]"}:
+                raise ValueError(f"{path} has trailing non-array JSON content.")
 
 
 def count_tokens(value: Any) -> int:
@@ -2974,20 +3026,28 @@ def reconstruct_trajectory(payload: JsonDict) -> TrajectoryRecord:
     )
 
 
+def reconstruct_failure(item: JsonDict) -> FailureCase:
+    return FailureCase(
+        failure_id=item["failure_id"],
+        domain=item["domain"],
+        task_split=item.get("task_split") or item.get("source_metadata", {}).get("task_split", "base"),
+        task_id=item["task_id"],
+        trajectory=reconstruct_trajectory(item["trajectory"]),
+        failure_reason=item["failure_reason"],
+        source=item.get("source", "synthetic_corruption"),
+        source_metadata=item.get("source_metadata") or {},
+    )
+
+
 def reconstruct_failures(payload: list[JsonDict]) -> list[FailureCase]:
-    return [
-        FailureCase(
-            failure_id=item["failure_id"],
-            domain=item["domain"],
-            task_split=item.get("task_split") or item.get("source_metadata", {}).get("task_split", "base"),
-            task_id=item["task_id"],
-            trajectory=reconstruct_trajectory(item["trajectory"]),
-            failure_reason=item["failure_reason"],
-            source=item.get("source", "synthetic_corruption"),
-            source_metadata=item.get("source_metadata") or {},
-        )
-        for item in payload
-    ]
+    return [reconstruct_failure(item) for item in payload]
+
+
+def iter_failure_cases(path: Path) -> Iterator[FailureCase]:
+    for item in iter_json_array(path):
+        if not isinstance(item, dict):
+            raise ValueError(f"{path} contained a non-object failure payload.")
+        yield reconstruct_failure(item)
 
 
 def select_collectable_task_ids(
@@ -3226,33 +3286,7 @@ def search_patches_cli(
     max_candidates_per_step: int | None = None,
     compact_results: bool = False,
 ) -> JsonDict:
-    failures_payload = load_json(input_dir / "failures.json")
-    failures = reconstruct_failures(failures_payload)
-    if not failures:
-        summary = {
-            "method_variant": MethodVariant.PATCH_SEARCH_STRUCTURED.value,
-            "strategy": strategy,
-            "include_oracle_suffix": include_oracle_suffix,
-            "proposer_backend": proposer_backend,
-            "compact_results": compact_results,
-            "failure_count": 0,
-            "recovered_count": 0,
-            "success_recovery_rate": 0.0,
-            "total_token_cost": 0,
-            "max_evaluations_per_failure": max_evaluations,
-            "known_fault_count": 0,
-            "known_fault_recovered_count": 0,
-            "localization_top1_accuracy": 0.0,
-            "localization_top3_accuracy": 0.0,
-            "localization_mrr": 0.0,
-            "mean_fault_rank": 0.0,
-            "median_fault_rank": 0.0,
-            "true_fault_recovery_rate": 0.0,
-            "recovered_true_fault_alignment": 0.0,
-        }
-        save_json(output_dir / "patch_results.json", [])
-        save_json(output_dir / "patch_summary.json", summary)
-        return summary
+    failures_path = input_dir / "failures.json"
     budget = BudgetConfig(
         max_evaluations_per_failure=max_evaluations,
         max_candidates_per_step=max_candidates_per_step,
@@ -3261,7 +3295,11 @@ def search_patches_cli(
     )
     engines: dict[tuple[str, str], PatchSearchEngine] = {}
     results: list[PatchSearchResult] = []
-    for failure in failures:
+    domains: set[str] = set()
+    task_splits: set[str] = set()
+    for failure in iter_failure_cases(failures_path):
+        domains.add(failure.domain)
+        task_splits.add(failure.task_split)
         engine_key = (failure.domain, failure.task_split)
         if engine_key not in engines:
             adapter = Tau3DomainAdapter(domain=failure.domain, task_split=failure.task_split)
@@ -3280,6 +3318,40 @@ def search_patches_cli(
                 budget=budget,
             )
         )
+    if not results:
+        summary = {
+            "method_variant": MethodVariant.PATCH_SEARCH_STRUCTURED.value,
+            "strategy": strategy,
+            "include_oracle_suffix": include_oracle_suffix,
+            "proposer_backend": proposer_backend,
+            "model_slug": model_slug,
+            "compact_results": compact_results,
+            "failure_count": 0,
+            "recovered_count": 0,
+            "success_recovery_rate": 0.0,
+            "total_token_cost": 0,
+            "max_evaluations_per_failure": max_evaluations,
+            "max_candidates_per_step": max_candidates_per_step,
+            "continuation_horizon": continuation_horizon,
+            "beam_width": beam_width,
+            "evaluated_candidate_count": 0,
+            "evaluated_family_counts": {},
+            "average_patch_size": 0.0,
+            "median_token_cost": 0.0,
+            "p90_token_cost": 0.0,
+            "known_fault_count": 0,
+            "known_fault_recovered_count": 0,
+            "localization_top1_accuracy": 0.0,
+            "localization_top3_accuracy": 0.0,
+            "localization_mrr": 0.0,
+            "mean_fault_rank": 0.0,
+            "median_fault_rank": 0.0,
+            "true_fault_recovery_rate": 0.0,
+            "recovered_true_fault_alignment": 0.0,
+        }
+        save_json(output_dir / "patch_results.json", [])
+        save_json(output_dir / "patch_summary.json", summary)
+        return summary
     recovered = sum(1 for item in results if item.recovered)
     recovered_patch_sizes = [
         item.winning_patch.size_score for item in results if item.winning_patch is not None
@@ -3297,8 +3369,8 @@ def search_patches_cli(
         "include_oracle_suffix": include_oracle_suffix,
         "proposer_backend": proposer_backend,
         "model_slug": model_slug,
-        "domains": sorted({failure.domain for failure in failures}),
-        "task_splits": sorted({failure.task_split for failure in failures}),
+        "domains": sorted(domains),
+        "task_splits": sorted(task_splits),
         "failure_count": len(results),
         "recovered_count": recovered,
         "success_recovery_rate": recovered / len(results),
@@ -3339,8 +3411,7 @@ def run_baselines_cli(
     beam_width: int = 2,
     compact_results: bool = False,
 ) -> JsonDict:
-    failures_payload = load_json(input_dir / "failures.json")
-    failures = reconstruct_failures(failures_payload)
+    failures_path = input_dir / "failures.json"
     budget = BudgetConfig(
         max_evaluations_per_failure=max_evaluations,
         continuation_horizon=continuation_horizon,
@@ -3349,7 +3420,32 @@ def run_baselines_cli(
     summaries: list[JsonDict] = []
     for method_variant in method_variants:
         variant_dir = output_dir / method_variant
-        if not failures:
+        engines: dict[tuple[str, str], RetryBaselineEngine] = {}
+        results: list[PatchSearchResult] = []
+        domains: set[str] = set()
+        task_splits: set[str] = set()
+        for failure in iter_failure_cases(failures_path):
+            domains.add(failure.domain)
+            task_splits.add(failure.task_split)
+            engine_key = (failure.domain, failure.task_split)
+            if engine_key not in engines:
+                adapter = Tau3DomainAdapter(domain=failure.domain, task_split=failure.task_split)
+                engines[engine_key] = RetryBaselineEngine(
+                    adapter=adapter,
+                    proposer_backend=proposer_backend,
+                    model_slug=model_slug,
+                    budget=budget,
+                )
+            results.append(
+                engines[engine_key].run(
+                    failure=failure,
+                    method_variant=method_variant,
+                    strategy=strategy,
+                    max_evaluations=max_evaluations,
+                    budget=budget,
+                )
+            )
+        if not results:
             summary = {
                 "method_variant": method_variant,
                 "strategy": strategy,
@@ -3376,27 +3472,6 @@ def run_baselines_cli(
             save_json(variant_dir / "patch_summary.json", summary)
             summaries.append(summary)
             continue
-        engines: dict[tuple[str, str], RetryBaselineEngine] = {}
-        results: list[PatchSearchResult] = []
-        for failure in failures:
-            engine_key = (failure.domain, failure.task_split)
-            if engine_key not in engines:
-                adapter = Tau3DomainAdapter(domain=failure.domain, task_split=failure.task_split)
-                engines[engine_key] = RetryBaselineEngine(
-                    adapter=adapter,
-                    proposer_backend=proposer_backend,
-                    model_slug=model_slug,
-                    budget=budget,
-                )
-            results.append(
-                engines[engine_key].run(
-                    failure=failure,
-                    method_variant=method_variant,
-                    strategy=strategy,
-                    max_evaluations=max_evaluations,
-                    budget=budget,
-                )
-            )
         recovered = sum(1 for item in results if item.recovered)
         patch_sizes = [
             item.winning_patch.size_score for item in results if item.winning_patch is not None
@@ -3408,8 +3483,8 @@ def run_baselines_cli(
             "strategy": strategy,
             "proposer_backend": proposer_backend,
             "model_slug": model_slug,
-            "domains": sorted({failure.domain for failure in failures}),
-            "task_splits": sorted({failure.task_split for failure in failures}),
+            "domains": sorted(domains),
+            "task_splits": sorted(task_splits),
             "failure_count": len(results),
             "recovered_count": recovered,
             "success_recovery_rate": recovered / len(results) if results else 0.0,
