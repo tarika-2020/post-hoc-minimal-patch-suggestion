@@ -288,6 +288,14 @@ def serialize_patch_search_results(
     return [serialize_patch_search_result(result, compact=compact) for result in results]
 
 
+def serialize_failure_case(failure: FailureCase) -> JsonDict:
+    return asdict(failure)
+
+
+def serialize_failure_cases(failures: list[FailureCase]) -> list[JsonDict]:
+    return [serialize_failure_case(failure) for failure in failures]
+
+
 def save_csv(path: Path, rows: list[JsonDict], fieldnames: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -300,6 +308,28 @@ def save_csv(path: Path, rows: list[JsonDict], fieldnames: list[str]) -> None:
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def write_jsonl(path: Path, rows: list[Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, default=serialize_dataclass) + "\n")
+
+
+def append_jsonl(path: Path, row: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(row, default=serialize_dataclass) + "\n")
+
+
+def iter_jsonl(path: Path) -> Iterator[Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            yield json.loads(stripped)
 
 
 def iter_json_array(path: Path, chunk_size: int = 1024 * 1024) -> Iterator[Any]:
@@ -3050,6 +3080,82 @@ def iter_failure_cases(path: Path) -> Iterator[FailureCase]:
         yield reconstruct_failure(item)
 
 
+def failure_shard_name(domain: str, task_split: str) -> str:
+    safe_domain = re.sub(r"[^A-Za-z0-9._-]+", "_", domain)
+    safe_split = re.sub(r"[^A-Za-z0-9._-]+", "_", task_split)
+    return f"{safe_domain}__{safe_split}.jsonl"
+
+
+def write_failure_artifacts(output_dir: Path, failures: list[FailureCase]) -> JsonDict:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    serialized = serialize_failure_cases(failures)
+    write_jsonl(output_dir / "failures.jsonl", serialized)
+    shard_dir = output_dir / "failure_shards"
+    shards: dict[tuple[str, str], list[JsonDict]] = {}
+    for payload in serialized:
+        key = (
+            str(payload.get("domain") or ""),
+            str(payload.get("task_split") or payload.get("source_metadata", {}).get("task_split", "base")),
+        )
+        shards.setdefault(key, []).append(payload)
+    shard_entries: list[JsonDict] = []
+    for (domain, task_split), shard_rows in sorted(shards.items()):
+        shard_name = failure_shard_name(domain, task_split)
+        shard_path = shard_dir / shard_name
+        write_jsonl(shard_path, shard_rows)
+        shard_entries.append(
+            {
+                "domain": domain,
+                "task_split": task_split,
+                "path": str(shard_path.relative_to(output_dir)),
+                "entry_count": len(shard_rows),
+            }
+        )
+    manifest = {
+        "format": "jsonl_sharded_v1",
+        "entry_count": len(serialized),
+        "root_path": "failures.jsonl",
+        "shards": shard_entries,
+    }
+    save_json(output_dir / "failures_manifest.json", manifest)
+    return manifest
+
+
+def iter_failure_cases_from_dir(input_dir: Path) -> Iterator[FailureCase]:
+    manifest_path = input_dir / "failures_manifest.json"
+    root_jsonl_path = input_dir / "failures.jsonl"
+    legacy_json_path = input_dir / "failures.json"
+    if manifest_path.exists():
+        manifest = load_json(manifest_path)
+        shards = manifest.get("shards") or []
+        if shards:
+            for shard in shards:
+                shard_path = input_dir / str(shard["path"])
+                for item in iter_jsonl(shard_path):
+                    if not isinstance(item, dict):
+                        raise ValueError(f"{shard_path} contained a non-object failure payload.")
+                    yield reconstruct_failure(item)
+            return
+        root_path = manifest.get("root_path")
+        if isinstance(root_path, str) and (input_dir / root_path).exists():
+            for item in iter_jsonl(input_dir / root_path):
+                if not isinstance(item, dict):
+                    raise ValueError(f"{input_dir / root_path} contained a non-object failure payload.")
+                yield reconstruct_failure(item)
+            return
+    if root_jsonl_path.exists():
+        for item in iter_jsonl(root_jsonl_path):
+            if not isinstance(item, dict):
+                raise ValueError(f"{root_jsonl_path} contained a non-object failure payload.")
+            yield reconstruct_failure(item)
+        return
+    if legacy_json_path.exists():
+        for failure in iter_failure_cases(legacy_json_path):
+            yield failure
+        return
+    raise FileNotFoundError(f"No supported failure artifact found in {input_dir}.")
+
+
 def select_collectable_task_ids(
     adapter: Tau3DomainAdapter,
     limit: int,
@@ -3116,7 +3222,7 @@ def collect_failures_cli(domain: str, task_split: str, limit: int, output_dir: P
     }
     save_json(output_dir / "reference_trajectories.json", reference_trajectories)
     save_json(output_dir / "failed_trajectories.json", trajectories)
-    save_json(output_dir / "failures.json", failures)
+    write_failure_artifacts(output_dir, failures)
     save_json(output_dir / "summary.json", summary)
     return summary
 
@@ -3134,7 +3240,7 @@ def import_natural_failures_cli(
         results_path=results_path,
         limit=limit if limit > 0 else None,
     )
-    save_json(output_dir / "failures.json", failures)
+    write_failure_artifacts(output_dir, failures)
     save_json(output_dir / "summary.json", summary)
     return summary
 
@@ -3150,6 +3256,85 @@ def percentile(values: list[float], fraction: float) -> float:
     upper = min(lower + 1, len(ordered) - 1)
     weight = index - lower
     return float(ordered[lower] * (1 - weight) + ordered[upper] * weight)
+
+
+def load_serialized_patch_results(input_dir: Path) -> list[JsonDict]:
+    jsonl_path = input_dir / "patch_results.jsonl"
+    legacy_json_path = input_dir / "patch_results.json"
+    if jsonl_path.exists():
+        return [item for item in iter_jsonl(jsonl_path) if isinstance(item, dict)]
+    if legacy_json_path.exists():
+        payload = load_json(legacy_json_path)
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+    return []
+
+
+def extract_result_domain(result_payload: JsonDict) -> str:
+    autopsy = result_payload.get("autopsy_report") or {}
+    return str(autopsy.get("domain") or "")
+
+
+def extract_result_task_split(result_payload: JsonDict) -> str:
+    autopsy = result_payload.get("autopsy_report") or {}
+    source_metadata = autopsy.get("source_metadata") or {}
+    task_split = autopsy.get("task_split") or source_metadata.get("task_split") or "base"
+    return normalize_task_split(str(task_split))
+
+
+def aggregate_patch_result_payloads(payload: list[JsonDict]) -> JsonDict:
+    recovered = [item for item in payload if item.get("recovered")]
+    patch_sizes = [
+        item["winning_patch"]["size_score"]
+        for item in recovered
+        if item.get("winning_patch")
+    ]
+    token_costs = [int(item.get("total_token_cost") or 0) for item in payload]
+    evaluated_family_counts: dict[str, int] = {}
+    for item in payload:
+        family_counts = item.get("evaluated_family_counts") or {}
+        for family, count in family_counts.items():
+            evaluated_family_counts[str(family)] = (
+                evaluated_family_counts.get(str(family), 0) + int(count)
+            )
+    return {
+        "failure_count": len(payload),
+        "recovered_count": len(recovered),
+        "success_recovery_rate": len(recovered) / len(payload) if payload else 0.0,
+        "total_token_cost": sum(token_costs),
+        "evaluated_candidate_count": sum(
+            len(item.get("evaluated_candidates") or []) for item in payload
+        ),
+        "evaluated_family_counts": dict(sorted(evaluated_family_counts.items())),
+        "average_patch_size": sum(patch_sizes) / len(patch_sizes) if patch_sizes else 0.0,
+        "median_token_cost": statistics.median(token_costs) if token_costs else 0.0,
+        "p90_token_cost": percentile(token_costs, 0.9),
+        "localization_metrics": build_localization_metrics(payload),
+    }
+
+
+def write_patch_result_artifacts(
+    output_dir: Path,
+    serialized_results: list[JsonDict],
+    summary: JsonDict,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    write_jsonl(output_dir / "patch_results.jsonl", serialized_results)
+    save_json(
+        output_dir / "patch_results_manifest.json",
+        {
+            "format": "jsonl_v1",
+            "entry_count": len(serialized_results),
+            "root_path": "patch_results.jsonl",
+            "summary_path": "patch_summary.json",
+            "progress_summary_path": "patch_summary.progress.json",
+        },
+    )
+    save_json(output_dir / "patch_summary.json", summary)
+
+
+def save_patch_progress_summary(output_dir: Path, summary: JsonDict) -> None:
+    save_json(output_dir / "patch_summary.progress.json", summary)
 
 
 def build_corpus_cli(
@@ -3199,7 +3384,7 @@ def build_corpus_cli(
     )
     rows = [asdict(entry) for entry in entries]
     save_json(output_dir / "corpus_manifest.json", manifest)
-    save_json(output_dir / "failures.json", all_failures)
+    write_failure_artifacts(output_dir, all_failures)
     if rows:
         save_csv(output_dir / "corpus_manifest.csv", rows, list(rows[0].keys()))
     return {
@@ -3258,7 +3443,7 @@ def build_synthetic_corpus_cli(
     )
     rows = [asdict(entry) for entry in entries]
     save_json(output_dir / "corpus_manifest.json", manifest)
-    save_json(output_dir / "failures.json", all_failures)
+    write_failure_artifacts(output_dir, all_failures)
     if rows:
         save_csv(output_dir / "corpus_manifest.csv", rows, list(rows[0].keys()))
     summary = {
@@ -3286,7 +3471,16 @@ def search_patches_cli(
     max_candidates_per_step: int | None = None,
     compact_results: bool = False,
 ) -> JsonDict:
-    failures_path = input_dir / "failures.json"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    existing_results = load_serialized_patch_results(output_dir)
+    results_jsonl_path = output_dir / "patch_results.jsonl"
+    if existing_results and not results_jsonl_path.exists():
+        write_jsonl(results_jsonl_path, existing_results)
+    existing_failure_ids = {
+        str(item.get("failure_id"))
+        for item in existing_results
+        if item.get("failure_id") is not None
+    }
     budget = BudgetConfig(
         max_evaluations_per_failure=max_evaluations,
         max_candidates_per_step=max_candidates_per_step,
@@ -3294,12 +3488,18 @@ def search_patches_cli(
         beam_width=beam_width,
     )
     engines: dict[tuple[str, str], PatchSearchEngine] = {}
-    results: list[PatchSearchResult] = []
-    domains: set[str] = set()
-    task_splits: set[str] = set()
-    for failure in iter_failure_cases(failures_path):
+    serialized_results: list[JsonDict] = list(existing_results)
+    domains: set[str] = {
+        extract_result_domain(item) for item in existing_results if extract_result_domain(item)
+    }
+    task_splits: set[str] = {
+        extract_result_task_split(item) for item in existing_results if extract_result_task_split(item)
+    }
+    for failure in iter_failure_cases_from_dir(input_dir):
         domains.add(failure.domain)
         task_splits.add(failure.task_split)
+        if failure.failure_id in existing_failure_ids:
+            continue
         engine_key = (failure.domain, failure.task_split)
         if engine_key not in engines:
             adapter = Tau3DomainAdapter(domain=failure.domain, task_split=failure.task_split)
@@ -3310,15 +3510,43 @@ def search_patches_cli(
                 model_slug=model_slug,
                 budget=budget,
             )
-        results.append(
-            engines[engine_key].search(
-                failure,
-                strategy=strategy,
-                max_evaluations=max_evaluations,
-                budget=budget,
-            )
+        result = engines[engine_key].search(
+            failure,
+            strategy=strategy,
+            max_evaluations=max_evaluations,
+            budget=budget,
         )
-    if not results:
+        serialized_result = serialize_patch_search_result(result, compact=compact_results)
+        serialized_results.append(serialized_result)
+        existing_failure_ids.add(failure.failure_id)
+        append_jsonl(results_jsonl_path, serialized_result)
+        aggregate = aggregate_patch_result_payloads(serialized_results)
+        progress_summary = {
+            "method_variant": MethodVariant.PATCH_SEARCH_STRUCTURED.value,
+            "strategy": strategy,
+            "include_oracle_suffix": include_oracle_suffix,
+            "proposer_backend": proposer_backend,
+            "model_slug": model_slug,
+            "domains": sorted(domain for domain in domains if domain),
+            "task_splits": sorted(task_split for task_split in task_splits if task_split),
+            "failure_count": aggregate["failure_count"],
+            "recovered_count": aggregate["recovered_count"],
+            "success_recovery_rate": aggregate["success_recovery_rate"],
+            "total_token_cost": aggregate["total_token_cost"],
+            "max_evaluations_per_failure": max_evaluations,
+            "max_candidates_per_step": max_candidates_per_step,
+            "continuation_horizon": continuation_horizon,
+            "beam_width": beam_width,
+            "evaluated_candidate_count": aggregate["evaluated_candidate_count"],
+            "evaluated_family_counts": aggregate["evaluated_family_counts"],
+            "compact_results": compact_results,
+            "average_patch_size": aggregate["average_patch_size"],
+            "median_token_cost": aggregate["median_token_cost"],
+            "p90_token_cost": aggregate["p90_token_cost"],
+            **aggregate["localization_metrics"],
+        }
+        save_patch_progress_summary(output_dir, progress_summary)
+    if not serialized_results:
         summary = {
             "method_variant": MethodVariant.PATCH_SEARCH_STRUCTURED.value,
             "strategy": strategy,
@@ -3349,53 +3577,34 @@ def search_patches_cli(
             "true_fault_recovery_rate": 0.0,
             "recovered_true_fault_alignment": 0.0,
         }
-        save_json(output_dir / "patch_results.json", [])
-        save_json(output_dir / "patch_summary.json", summary)
+        write_patch_result_artifacts(output_dir, [], summary)
         return summary
-    recovered = sum(1 for item in results if item.recovered)
-    recovered_patch_sizes = [
-        item.winning_patch.size_score for item in results if item.winning_patch is not None
-    ]
-    evaluated_candidate_count = sum(len(item.evaluated_candidates) for item in results)
-    evaluated_family_counts: dict[str, int] = {}
-    for result in results:
-        for family, count in result.evaluated_family_counts.items():
-            evaluated_family_counts[family] = evaluated_family_counts.get(family, 0) + count
-    token_costs = [item.total_token_cost for item in results]
-    localization_metrics = build_localization_metrics([asdict(item) for item in results])
+    aggregate = aggregate_patch_result_payloads(serialized_results)
     summary = {
         "method_variant": MethodVariant.PATCH_SEARCH_STRUCTURED.value,
         "strategy": strategy,
         "include_oracle_suffix": include_oracle_suffix,
         "proposer_backend": proposer_backend,
         "model_slug": model_slug,
-        "domains": sorted(domains),
-        "task_splits": sorted(task_splits),
-        "failure_count": len(results),
-        "recovered_count": recovered,
-        "success_recovery_rate": recovered / len(results),
-        "total_token_cost": sum(item.total_token_cost for item in results),
+        "domains": sorted(domain for domain in domains if domain),
+        "task_splits": sorted(task_split for task_split in task_splits if task_split),
+        "failure_count": aggregate["failure_count"],
+        "recovered_count": aggregate["recovered_count"],
+        "success_recovery_rate": aggregate["success_recovery_rate"],
+        "total_token_cost": aggregate["total_token_cost"],
         "max_evaluations_per_failure": max_evaluations,
         "max_candidates_per_step": max_candidates_per_step,
         "continuation_horizon": continuation_horizon,
         "beam_width": beam_width,
-        "evaluated_candidate_count": evaluated_candidate_count,
-        "evaluated_family_counts": dict(sorted(evaluated_family_counts.items())),
+        "evaluated_candidate_count": aggregate["evaluated_candidate_count"],
+        "evaluated_family_counts": aggregate["evaluated_family_counts"],
         "compact_results": compact_results,
-        "average_patch_size": (
-            sum(recovered_patch_sizes) / len(recovered_patch_sizes)
-            if recovered_patch_sizes
-            else 0.0
-        ),
-        "median_token_cost": statistics.median(token_costs) if token_costs else 0.0,
-        "p90_token_cost": percentile(token_costs, 0.9),
-        **localization_metrics,
+        "average_patch_size": aggregate["average_patch_size"],
+        "median_token_cost": aggregate["median_token_cost"],
+        "p90_token_cost": aggregate["p90_token_cost"],
+        **aggregate["localization_metrics"],
     }
-    save_json(
-        output_dir / "patch_results.json",
-        serialize_patch_search_results(results, compact=compact_results),
-    )
-    save_json(output_dir / "patch_summary.json", summary)
+    write_patch_result_artifacts(output_dir, serialized_results, summary)
     return summary
 
 
@@ -3411,7 +3620,6 @@ def run_baselines_cli(
     beam_width: int = 2,
     compact_results: bool = False,
 ) -> JsonDict:
-    failures_path = input_dir / "failures.json"
     budget = BudgetConfig(
         max_evaluations_per_failure=max_evaluations,
         continuation_horizon=continuation_horizon,
@@ -3420,13 +3628,29 @@ def run_baselines_cli(
     summaries: list[JsonDict] = []
     for method_variant in method_variants:
         variant_dir = output_dir / method_variant
+        variant_dir.mkdir(parents=True, exist_ok=True)
+        existing_results = load_serialized_patch_results(variant_dir)
+        results_jsonl_path = variant_dir / "patch_results.jsonl"
+        if existing_results and not results_jsonl_path.exists():
+            write_jsonl(results_jsonl_path, existing_results)
+        existing_failure_ids = {
+            str(item.get("failure_id"))
+            for item in existing_results
+            if item.get("failure_id") is not None
+        }
         engines: dict[tuple[str, str], RetryBaselineEngine] = {}
-        results: list[PatchSearchResult] = []
-        domains: set[str] = set()
-        task_splits: set[str] = set()
-        for failure in iter_failure_cases(failures_path):
+        serialized_results: list[JsonDict] = list(existing_results)
+        domains: set[str] = {
+            extract_result_domain(item) for item in existing_results if extract_result_domain(item)
+        }
+        task_splits: set[str] = {
+            extract_result_task_split(item) for item in existing_results if extract_result_task_split(item)
+        }
+        for failure in iter_failure_cases_from_dir(input_dir):
             domains.add(failure.domain)
             task_splits.add(failure.task_split)
+            if failure.failure_id in existing_failure_ids:
+                continue
             engine_key = (failure.domain, failure.task_split)
             if engine_key not in engines:
                 adapter = Tau3DomainAdapter(domain=failure.domain, task_split=failure.task_split)
@@ -3436,16 +3660,42 @@ def run_baselines_cli(
                     model_slug=model_slug,
                     budget=budget,
                 )
-            results.append(
-                engines[engine_key].run(
-                    failure=failure,
-                    method_variant=method_variant,
-                    strategy=strategy,
-                    max_evaluations=max_evaluations,
-                    budget=budget,
-                )
+            result = engines[engine_key].run(
+                failure=failure,
+                method_variant=method_variant,
+                strategy=strategy,
+                max_evaluations=max_evaluations,
+                budget=budget,
             )
-        if not results:
+            serialized_result = serialize_patch_search_result(result, compact=compact_results)
+            serialized_results.append(serialized_result)
+            existing_failure_ids.add(failure.failure_id)
+            append_jsonl(results_jsonl_path, serialized_result)
+            aggregate = aggregate_patch_result_payloads(serialized_results)
+            progress_summary = {
+                "method_variant": method_variant,
+                "strategy": strategy,
+                "proposer_backend": proposer_backend,
+                "model_slug": model_slug,
+                "domains": sorted(domain for domain in domains if domain),
+                "task_splits": sorted(task_split for task_split in task_splits if task_split),
+                "failure_count": aggregate["failure_count"],
+                "recovered_count": aggregate["recovered_count"],
+                "success_recovery_rate": aggregate["success_recovery_rate"],
+                "total_token_cost": aggregate["total_token_cost"],
+                "max_evaluations_per_failure": max_evaluations,
+                "continuation_horizon": continuation_horizon,
+                "beam_width": beam_width,
+                "evaluated_candidate_count": aggregate["evaluated_candidate_count"],
+                "evaluated_family_counts": aggregate["evaluated_family_counts"],
+                "compact_results": compact_results,
+                "average_patch_size": aggregate["average_patch_size"],
+                "median_token_cost": aggregate["median_token_cost"],
+                "p90_token_cost": aggregate["p90_token_cost"],
+                **aggregate["localization_metrics"],
+            }
+            save_patch_progress_summary(variant_dir, progress_summary)
+        if not serialized_results:
             summary = {
                 "method_variant": method_variant,
                 "strategy": strategy,
@@ -3468,43 +3718,33 @@ def run_baselines_cli(
                 "true_fault_recovery_rate": 0.0,
                 "recovered_true_fault_alignment": 0.0,
             }
-            save_json(variant_dir / "patch_results.json", [])
-            save_json(variant_dir / "patch_summary.json", summary)
+            write_patch_result_artifacts(variant_dir, [], summary)
             summaries.append(summary)
             continue
-        recovered = sum(1 for item in results if item.recovered)
-        patch_sizes = [
-            item.winning_patch.size_score for item in results if item.winning_patch is not None
-        ]
-        token_costs = [item.total_token_cost for item in results]
-        localization_metrics = build_localization_metrics([asdict(item) for item in results])
+        aggregate = aggregate_patch_result_payloads(serialized_results)
         summary = {
             "method_variant": method_variant,
             "strategy": strategy,
             "proposer_backend": proposer_backend,
             "model_slug": model_slug,
-            "domains": sorted(domains),
-            "task_splits": sorted(task_splits),
-            "failure_count": len(results),
-            "recovered_count": recovered,
-            "success_recovery_rate": recovered / len(results) if results else 0.0,
-            "total_token_cost": sum(item.total_token_cost for item in results),
+            "domains": sorted(domain for domain in domains if domain),
+            "task_splits": sorted(task_split for task_split in task_splits if task_split),
+            "failure_count": aggregate["failure_count"],
+            "recovered_count": aggregate["recovered_count"],
+            "success_recovery_rate": aggregate["success_recovery_rate"],
+            "total_token_cost": aggregate["total_token_cost"],
             "max_evaluations_per_failure": max_evaluations,
             "continuation_horizon": continuation_horizon,
             "beam_width": beam_width,
-            "evaluated_candidate_count": sum(len(item.evaluated_candidates) for item in results),
-            "evaluated_family_counts": {method_variant: sum(len(item.evaluated_candidates) for item in results)},
+            "evaluated_candidate_count": aggregate["evaluated_candidate_count"],
+            "evaluated_family_counts": aggregate["evaluated_family_counts"],
             "compact_results": compact_results,
-            "average_patch_size": sum(patch_sizes) / len(patch_sizes) if patch_sizes else 0.0,
-            "median_token_cost": statistics.median(token_costs) if token_costs else 0.0,
-            "p90_token_cost": percentile(token_costs, 0.9),
-            **localization_metrics,
+            "average_patch_size": aggregate["average_patch_size"],
+            "median_token_cost": aggregate["median_token_cost"],
+            "p90_token_cost": aggregate["p90_token_cost"],
+            **aggregate["localization_metrics"],
         }
-        save_json(
-            variant_dir / "patch_results.json",
-            serialize_patch_search_results(results, compact=compact_results),
-        )
-        save_json(variant_dir / "patch_summary.json", summary)
+        write_patch_result_artifacts(variant_dir, serialized_results, summary)
         summaries.append(summary)
     report = {
         "method_variants": method_variants,
@@ -3675,7 +3915,7 @@ def build_aggregate_autopsy_report(payload: list[JsonDict]) -> JsonDict:
 
 
 def report_autopsy_cli(input_dir: Path, output_path: Path) -> JsonDict:
-    payload = load_json(input_dir / "patch_results.json")
+    payload = load_serialized_patch_results(input_dir)
     report = build_aggregate_autopsy_report(payload)
     save_json(output_path, report)
     return report
@@ -3691,11 +3931,12 @@ def make_paper_tables_cli(
     localization_rows: list[JsonDict] = []
     for input_dir in input_dirs:
         summary_path = input_dir / "patch_summary.json"
-        results_path = input_dir / "patch_results.json"
-        if not summary_path.exists() or not results_path.exists():
+        if not summary_path.exists():
             continue
         summary = load_json(summary_path)
-        payload = load_json(results_path)
+        payload = load_serialized_patch_results(input_dir)
+        if not payload:
+            continue
         aggregate = build_aggregate_autopsy_report(payload)
         label = input_dir.name
         main_rows.append(
@@ -4374,8 +4615,12 @@ def _artifact_entry_paths(input_dir: Path) -> list[str]:
         "strategy_comparison.json",
         "corpus_manifest.json",
         "summary.json",
+        "failures_manifest.json",
+        "failures.jsonl",
         "patch_summary.json",
-        "patch_results.json",
+        "patch_summary.progress.json",
+        "patch_results_manifest.json",
+        "patch_results.jsonl",
         "paper_tables.json",
         "paper_tables.md",
         "figure_data.csv",
@@ -5104,7 +5349,7 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument(
         "--compact-results",
         action="store_true",
-        help="Omit per-candidate replay trajectories from patch_results.json to keep large runs lightweight.",
+        help="Omit per-candidate replay trajectories from incremental patch_results.jsonl writes to keep large runs lightweight.",
     )
 
     compare = subparsers.add_parser(
@@ -5153,7 +5398,7 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument(
         "--compact-results",
         action="store_true",
-        help="Write lightweight patch_results.json files without replay trajectories.",
+        help="Write lightweight patch_results.jsonl files without replay trajectories.",
     )
 
     baselines = subparsers.add_parser(
@@ -5189,7 +5434,7 @@ def build_parser() -> argparse.ArgumentParser:
     baselines.add_argument(
         "--compact-results",
         action="store_true",
-        help="Write lightweight patch_results.json files without replay trajectories.",
+        help="Write lightweight patch_results.jsonl files without replay trajectories.",
     )
 
     batch = subparsers.add_parser(
@@ -5216,7 +5461,7 @@ def build_parser() -> argparse.ArgumentParser:
     sweep_budget.add_argument(
         "--compact-results",
         action="store_true",
-        help="Write lightweight patch_results.json files without replay trajectories.",
+        help="Write lightweight patch_results.jsonl files without replay trajectories.",
     )
 
     sweep_models = subparsers.add_parser(
@@ -5231,7 +5476,7 @@ def build_parser() -> argparse.ArgumentParser:
     sweep_models.add_argument(
         "--compact-results",
         action="store_true",
-        help="Write lightweight patch_results.json files without replay trajectories.",
+        help="Write lightweight patch_results.jsonl files without replay trajectories.",
     )
 
     figures = subparsers.add_parser(
@@ -5269,7 +5514,7 @@ def build_parser() -> argparse.ArgumentParser:
     bundle.add_argument(
         "--full-results",
         action="store_true",
-        help="Keep full replay trajectories inside patch_results.json instead of the compact paper-bundle default.",
+        help="Keep full replay trajectories inside patch_results.jsonl instead of the compact paper-bundle default.",
     )
 
     workshop_bundle = subparsers.add_parser(
@@ -5321,7 +5566,7 @@ def build_parser() -> argparse.ArgumentParser:
     workshop_bundle.add_argument(
         "--full-results",
         action="store_true",
-        help="Keep full replay trajectories inside patch_results.json instead of the compact workshop-bundle default.",
+        help="Keep full replay trajectories inside patch_results.jsonl instead of the compact workshop-bundle default.",
     )
 
     tables = subparsers.add_parser(
