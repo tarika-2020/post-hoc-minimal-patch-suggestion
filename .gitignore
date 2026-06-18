@@ -73,3 +73,13 @@ artifacts/reproducibility_snapshot/**
 !artifacts/reproducibility_snapshot/REPRODUCIBILITY.md
 !artifacts/reproducibility_snapshot/requirements-lock.txt
 !artifacts/reproducibility_snapshot/requirements-selected.txt
+
+# Local LaTeX build artifacts
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.pdf
+paper/*pdflatex_pass*.out
+paper/*bibtex.out

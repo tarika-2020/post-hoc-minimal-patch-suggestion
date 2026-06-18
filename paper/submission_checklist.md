@@ -23,7 +23,7 @@ artifacts, and commands already present in the repository.
 | Preliminary experiments/results | `done` | [paper_draft.md](./paper_draft.md) | Replace smoke framing with full main results once larger runs finish |
 | Limitations | `done` | [paper_draft.md](./paper_draft.md) | Update after final experiments |
 | Conclusion/future work | `done` | [paper_draft.md](./paper_draft.md) | Minor revision after final tables |
-| Final paper formatting | `in_progress` | [neurips_paper.tex](./neurips_paper.tex), [references.bib](./references.bib), [README.md](./README.md) | Compile with official NeurIPS style and swap smoke tables for final large-run tables/figures; `pdflatex` is not installed in the current local environment |
+| Final paper formatting | `in_progress` | [neurips_paper.tex](./neurips_paper.tex), [workshop_paper.tex](./workshop_paper.tex), [references.bib](./references.bib), [README.md](./README.md) | Local MiKTeX toolchain is installed and both manuscripts compile (`workshop_paper.pdf`, `neurips_paper.pdf`); remaining work is to compile against the final official workshop/NeurIPS style bundle and swap smoke tables for final large-run tables/figures |
 
 ## Core Method Evidence
 
