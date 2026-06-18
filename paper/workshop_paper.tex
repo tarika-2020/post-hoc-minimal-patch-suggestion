@@ -118,9 +118,11 @@ analysis.
 The codebase now supports the full workshop artifact path: building natural and
 synthetic corpora, running structured patch search, running retry baselines,
 exporting tables and figure CSVs, and generating reviewer-facing artifact
-bundles. In the current repo state, the corpus freeze is complete while the
-final downstream result bundle is still being regenerated from those frozen
-artifacts.
+bundles. The artifact layer now uses resumable JSONL outputs and sharded
+failure corpora so the frozen workshop release can be regenerated without
+eagerly materializing a multi-gigabyte corpus in memory. In the current repo
+state, the corpus freeze is complete while the final downstream result bundle
+is still being regenerated from those frozen artifacts.
 
 \section{Related Work}
 
@@ -165,7 +167,9 @@ What is already true in the repository:
   \item strict non-oracle natural recovery is no longer only synthetic, with
   artifact-backed retail continuation recovery and airline deletion recovery;
   \item workshop-specific retry baselines and artifact bundling are implemented
-  in the experiment harness.
+  in the experiment harness;
+  \item the workshop artifact path now supports streaming JSONL corpora,
+  per-domain shards, and resumable result writes for long reruns.
 \end{itemize}
 
 What still separates the workshop version from a full conference paper:
@@ -184,10 +188,10 @@ The current system is still limited by continuation quality, patch-family
 coverage, and experiment scale. Some failures are easy to localize but hard to
 repair without a stronger continuation proposer. Others likely require context
 editing or multi-step intervention beyond the current one-step framework. The
-next milestone is to finish the release bundle over the already-frozen corpora,
-populate the short paper with the saved tables and case studies, and rerun the
-hosted retry baselines from an environment-provided API key rather than any
-tracked project document.
+next milestone is to finish the clean canonical reruns over the already-frozen
+corpora, populate the short paper with the saved tables and case studies, and
+refresh the hosted retry baselines from an environment-provided API key rather
+than any tracked project document.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
