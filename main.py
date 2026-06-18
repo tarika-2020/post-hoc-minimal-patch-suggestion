@@ -356,6 +356,8 @@ class Tau3DomainAdapter:
             task.id: task for task in self.loader["get_tasks"](self.task_split)
         }
         self._tool_introspection_env: Any | None = None
+        self._tool_catalog_cache: list[JsonDict] | None = None
+        self._tool_name_cache: set[str] | None = None
 
     def get_task(self, task_id: str) -> Task:
         return self.tasks[task_id]
@@ -392,6 +394,57 @@ class Tau3DomainAdapter:
             "refund_",
         )
         return lowered.startswith(fallback_prefixes)
+
+    def get_tool_catalog(self) -> list[JsonDict]:
+        if self._tool_catalog_cache is not None:
+            return copy.deepcopy(self._tool_catalog_cache)
+        env = self.create_environment()
+        catalog: list[JsonDict] = []
+        seen_names: set[str] = set()
+        for attr in ("tools", "user_tools"):
+            tool_container = getattr(env, attr, None)
+            if tool_container is None or not hasattr(tool_container, "get_tools"):
+                continue
+            try:
+                tool_map = tool_container.get_tools()
+            except Exception:
+                continue
+            if not isinstance(tool_map, dict):
+                continue
+            for name, tool in tool_map.items():
+                if not isinstance(name, str) or name in seen_names:
+                    continue
+                seen_names.add(name)
+                short_desc = str(getattr(tool, "short_desc", "") or "")
+                long_desc = str(getattr(tool, "long_desc", "") or "")
+                parameter_names: list[str] = []
+                params_model = getattr(tool, "params", None)
+                if params_model is not None and hasattr(params_model, "model_json_schema"):
+                    try:
+                        schema = params_model.model_json_schema()
+                        properties = schema.get("properties") or {}
+                        if isinstance(properties, dict):
+                            parameter_names = [str(key) for key in properties.keys()]
+                    except Exception:
+                        parameter_names = []
+                catalog.append(
+                    {
+                        "name": name,
+                        "description": short_desc or long_desc,
+                        "parameters": parameter_names,
+                    }
+                )
+        self._tool_catalog_cache = sorted(catalog, key=lambda item: item["name"])
+        self._tool_name_cache = {item["name"] for item in self._tool_catalog_cache}
+        return copy.deepcopy(self._tool_catalog_cache)
+
+    def has_tool(self, tool_name: str) -> bool:
+        normalized = str(tool_name or "").strip()
+        if not normalized:
+            return False
+        if self._tool_name_cache is None:
+            self.get_tool_catalog()
+        return normalized in (self._tool_name_cache or set())
 
     def initial_messages(self, task: Task) -> list[Any]:
         if task.initial_state and task.initial_state.message_history:
@@ -1373,11 +1426,17 @@ class DeterministicProposer(BaseProposer):
 
 
 class OpenRouterProposer(BaseProposer):
-    def __init__(self, model_slug: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        adapter: Tau3DomainAdapter,
+        model_slug: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
         super().__init__(
             backend=ProposerBackend.OPENROUTER.value,
             model_slug=model_slug or "openai/gpt-4.1-mini",
         )
+        self.adapter = adapter
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
 
     def _request_actions(
@@ -1391,7 +1450,19 @@ class OpenRouterProposer(BaseProposer):
         source: str,
         action_prefix: str,
     ) -> tuple[list[ContinuationCandidate], ProposerMetadata]:
-        prompt = json.dumps(prompt_payload, indent=2)
+        tool_catalog = self.adapter.get_tool_catalog()
+        enriched_payload = {
+            **copy.deepcopy(prompt_payload),
+            "available_tools": tool_catalog,
+            "requestor_constraint": normalize_action_requestor(requestor),
+            "output_rules": [
+                "Use only tool names from available_tools.",
+                "Do not invent or rename tools.",
+                "Set requestor to the provided requestor_constraint unless the action must be user-authored.",
+                "If no valid tool action helps, return {\"actions\": []}.",
+            ],
+        }
+        prompt = json.dumps(enriched_payload, indent=2)
         metadata = ProposerMetadata(
             backend=self.backend,
             model_slug=self.model_slug,
@@ -1410,7 +1481,7 @@ class OpenRouterProposer(BaseProposer):
                     "role": "system",
                     "content": (
                         "You propose short structured tool actions for benchmark agents. "
-                        "Return valid JSON only."
+                        "Return valid JSON only. Use exact benchmark tool names only."
                     ),
                 },
                 {"role": "user", "content": prompt},
@@ -1454,6 +1525,7 @@ class OpenRouterProposer(BaseProposer):
             metadata.error = "JSON payload did not contain an actions list."
             return [], metadata
         normalized_actions: list[JsonDict] = []
+        invalid_tool_names: list[str] = []
         for index, action in enumerate(proposed_actions[: budget.continuation_horizon]):
             if not isinstance(action, dict):
                 continue
@@ -1461,6 +1533,9 @@ class OpenRouterProposer(BaseProposer):
             action_requestor = normalize_action_requestor(action.get("requestor", requestor))
             arguments = action.get("arguments", {})
             if not isinstance(name, str) or not isinstance(arguments, dict):
+                continue
+            if not self.adapter.has_tool(name):
+                invalid_tool_names.append(str(name))
                 continue
             normalized_actions.append(
                 {
@@ -1474,7 +1549,19 @@ class OpenRouterProposer(BaseProposer):
             )
         if not normalized_actions:
             metadata.status = "empty"
+            if invalid_tool_names:
+                unique_names = sorted(set(invalid_tool_names))
+                metadata.error = (
+                    "Model proposed only invalid tool names: "
+                    + ", ".join(unique_names[:8])
+                )
             return [], metadata
+        if invalid_tool_names:
+            unique_names = sorted(set(invalid_tool_names))
+            metadata.error = (
+                "Dropped invalid tool names: "
+                + ", ".join(unique_names[:8])
+            )
         return (
             [
                 ContinuationCandidate(
@@ -1743,7 +1830,7 @@ class PatchSearchEngine:
         self.default_budget = copy.deepcopy(budget) if budget else BudgetConfig()
         self.proposer_backend = proposer_backend
         if proposer_backend == ProposerBackend.OPENROUTER.value:
-            self.proposer: BaseProposer = OpenRouterProposer(model_slug=model_slug)
+            self.proposer: BaseProposer = OpenRouterProposer(adapter=adapter, model_slug=model_slug)
         else:
             self.proposer = DeterministicProposer()
 
@@ -2546,7 +2633,7 @@ class RetryBaselineEngine:
         self.default_budget = copy.deepcopy(budget) if budget else BudgetConfig()
         self.proposer_backend = proposer_backend
         if proposer_backend == ProposerBackend.OPENROUTER.value:
-            self.proposer: BaseProposer = OpenRouterProposer(model_slug=model_slug)
+            self.proposer: BaseProposer = OpenRouterProposer(adapter=adapter, model_slug=model_slug)
         else:
             self.proposer = DeterministicProposer()
 
