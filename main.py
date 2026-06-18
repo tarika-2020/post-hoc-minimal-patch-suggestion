@@ -5091,6 +5091,7 @@ def make_case_studies_cli(
     max_cases: int = 5,
     include_unrecovered: bool = False,
 ) -> JsonDict:
+    output_dir.mkdir(parents=True, exist_ok=True)
     cases, resolved_paths = load_autopsy_cases(input_paths)
     ordered = sorted(cases, key=_case_sort_key)
     if not include_unrecovered:

@@ -52,11 +52,14 @@ artifact-backed evidence already includes strict non-oracle recoveries in both
 retail and airline settings, including continuation-based recovery after an
 identity-lookup repair and deletion-based recovery for harmful mutating
 actions. The frozen workshop corpus now contains $80$ replay-failing natural
-cases and $24$ controlled synthetic failures across retail and airline. These
-results motivate replayable execution intervention as a practical debugging
-protocol for LLM agents: more causal than prompt-only retry, more interpretable
-than unconstrained regeneration, and naturally aligned with benchmark
-evaluation.
+cases and $24$ controlled synthetic failures across retail and airline. On the
+saved workshop release, structured strict replay recovers $27/80$ natural
+failures, the oracle upper bound reaches $35/80$, and the best simple retry
+baseline recovers $3/80$; on the synthetic corpus, heuristic localization
+recovers $24/24$ with perfect top-1 localization. These results motivate
+replayable execution intervention as a practical debugging protocol for LLM
+agents: more causal than prompt-only retry, more interpretable than
+unconstrained regeneration, and naturally aligned with benchmark evaluation.
 \end{abstract}
 
 \section{Introduction}
@@ -186,9 +189,12 @@ evidence rather than benchmark-scale repair claims. The intended ablation set
 includes no repair, random candidate / random localization, reverse search,
 tool-deletion-only search, continuation-replacement-only search, and the
 oracle suffix upper bound. The corpus scale has already moved from the earlier
-thirty-two-case smoke setting to a frozen $80$-case natural corpus, while the
-final artifact-backed workshop tables are still being regenerated from those
-saved failures.
+thirty-two-case smoke setting to a frozen $80$-case natural corpus. The final
+saved workshop artifacts now show $27/80$ strict natural recoveries
+($33.8\%$), $35/80$ oracle-upper-bound recoveries ($43.8\%$), and at most
+$3/80$ recoveries for the simple retry baselines. On the frozen $24$-case
+synthetic corpus, heuristic search reaches $24/24$ recovery with perfect
+top-1 localization.
 
 The codebase now supports the full workshop artifact path: building natural and
 synthetic corpora, running structured patch search, running retry baselines,
@@ -196,8 +202,8 @@ exporting tables and figure CSVs, and generating reviewer-facing artifact
 bundles. The artifact layer now uses resumable JSONL outputs and sharded
 failure corpora so the frozen workshop release can be regenerated without
 eagerly materializing a multi-gigabyte corpus in memory. In the current repo
-state, the corpus freeze is complete while the final downstream result bundle
-is still being regenerated from those frozen artifacts.
+state, the workshop release now includes saved oracle autopsies, paper tables,
+figure CSVs, and a curated three-case study bundle over the frozen artifacts.
 
 \subsection*{Concrete Autopsy Example}
 
@@ -272,16 +278,17 @@ What is already true in the repository:
   exact replay;
   \item strict non-oracle natural recovery is no longer only synthetic, with
   artifact-backed retail continuation recovery and airline deletion recovery;
+  \item the frozen workshop release now saves $27/80$ strict natural
+  recoveries, $35/80$ oracle-upper-bound recoveries, and a strongest simple
+  retry baseline of $3/80$;
   \item workshop-specific retry baselines and artifact bundling are implemented
   in the experiment harness;
-  \item the workshop artifact path now supports streaming JSONL corpora,
-  per-domain shards, and resumable result writes for long reruns.
+  \item the workshop artifact path now includes saved oracle autopsies, paper
+  tables, figure CSVs, and a curated three-case workshop panel.
 \end{itemize}
 
 What still separates the workshop version from a full conference paper:
 \begin{itemize}
-  \item completed final workshop result tables and figures from the frozen
-  corpora,
   \item hosted retry baselines at a scale beyond free-tier request caps,
   \item stronger non-oracle continuation at scale,
   \item broader baseline coverage,
@@ -294,10 +301,10 @@ The current system is still limited by continuation quality, patch-family
 coverage, and experiment scale. Some failures are easy to localize but hard to
 repair without a stronger continuation proposer. Others likely require context
 editing or multi-step intervention beyond the current one-step framework. The
-next milestone is to finish the clean canonical reruns over the already-frozen
-corpora, populate the short paper with the saved tables and case studies, and
-refresh the hosted retry baselines from an environment-provided API key rather
-than any tracked project document.
+next milestone is to scale beyond the already-frozen $80$/$24$ workshop
+release, strengthen non-oracle continuation, and evaluate whether these saved
+autopsies remain useful when recovery rates drop on broader natural-failure
+corpora.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
