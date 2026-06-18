@@ -1753,7 +1753,10 @@ class PatchSearchEngine:
         for step_index in localization.ranked_steps:
             candidates = self.propose_patch_candidates(failure, step_index, active_budget)
             if active_budget.max_candidates_per_step is not None:
-                candidates = candidates[: active_budget.max_candidates_per_step]
+                candidates = self._truncate_candidates_for_budget(
+                    candidates,
+                    active_budget.max_candidates_per_step,
+                )
             if strategy == "random_candidate":
                 random.shuffle(candidates)
             for candidate in candidates:
@@ -1808,6 +1811,33 @@ class PatchSearchEngine:
             evaluated_family_counts=dict(sorted(evaluated_family_counts.items())),
             autopsy_report=autopsy,
         )
+
+    def _truncate_candidates_for_budget(
+        self,
+        candidates: list[PatchCandidate],
+        max_candidates_per_step: int,
+    ) -> list[PatchCandidate]:
+        if max_candidates_per_step <= 0:
+            return []
+        if not self.include_oracle_suffix:
+            return candidates[:max_candidates_per_step]
+        oracle_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.patch_family == PatchFamily.TOOL_CALL_WITH_ORACLE_SUFFIX.value
+        ]
+        if not oracle_candidates:
+            return candidates[:max_candidates_per_step]
+        non_oracle_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.patch_family != PatchFamily.TOOL_CALL_WITH_ORACLE_SUFFIX.value
+        ]
+        selected = oracle_candidates[:max_candidates_per_step]
+        remaining = max_candidates_per_step - len(selected)
+        if remaining > 0:
+            selected.extend(non_oracle_candidates[:remaining])
+        return selected
 
     def localize_step(
         self,
