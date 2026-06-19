@@ -1,0 +1,402 @@
+\documentclass{article}
+\usepackage[submission]{colm2026_conference}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage[hypertexnames=false]{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{lineno}
+
+\definecolor{darkblue}{rgb}{0, 0, 0.5}
+\hypersetup{colorlinks=true, citecolor=darkblue, linkcolor=darkblue, urlcolor=darkblue}
+
+\title{Minimal Execution Patches for Causal Debugging of Tool-Using Agents}
+
+\author{Anonymous Authors}
+
+\begin{document}
+
+\ifcolmsubmission
+\linenumbers
+\fi
+
+\maketitle
+
+\begin{abstract}
+Tool-using language agents often fail because one intermediate action corrupts
+the downstream execution state, yet standard benchmark evaluation usually
+reveals only the final reward and a raw trajectory trace. We propose execution
+intervention for post-hoc debugging: a methodology that treats failed agent
+trajectories as replayable programs. Given a failed run with checkpointed
+environment state, the method restores an intermediate snapshot, applies a
+small structured patch, replays execution, and checks whether the benchmark
+outcome flips from failure to success. The smallest successful intervention is
+useful both as a repair and as a causal autopsy of the root failure. We
+instantiate this protocol on real tau-style environments with deterministic
+state, saved benchmark trajectories, and benchmark-native evaluators. The
+current system supports structured patch families, bounded search-cost
+accounting, strict versus oracle continuation analysis, and explicit rerun
+baselines including retry from scratch and retry from a localized snapshot. On
+controlled synthetic failures, the prototype supports exact localization
+metrics in addition to recovery. On imported natural failures, the current
+artifact-backed evidence already includes strict non-oracle recoveries in both
+retail and airline settings, including continuation-based recovery after an
+identity-lookup repair and deletion-based recovery for harmful mutating
+actions. The frozen workshop corpus now contains $80$ replay-failing natural
+cases and $24$ controlled synthetic failures across retail and airline. On the
+updated workshop artifacts, structured strict replay recovers $27/80$ natural
+failures, the oracle upper bound reaches $35/80$, and the strongest simple retry
+baseline recovers $15/80$; on the synthetic corpus, heuristic localization
+recovers $24/24$ with perfect top-1 localization. These results motivate
+replayable execution intervention as a practical debugging protocol for LLM
+agents: more causal than prompt-only retry, more interpretable than
+unconstrained regeneration, and naturally aligned with benchmark evaluation.
+\end{abstract}
+
+\section{Introduction}
+
+Many agent benchmarks now measure multi-step interaction with tools, APIs,
+databases, browsers, or code environments. When such an agent fails, the usual
+options are limited: inspect the trace manually, rerun with a stronger model,
+or prompt the model to reflect and retry. These approaches can improve task
+success, but they do not cleanly answer a debugging question: which
+intermediate decision actually caused the failure?
+
+Our central claim is that replayable environments let us ask a stronger causal
+question. If we can checkpoint and restore execution state at each step, then a
+failed trajectory is not merely a transcript. It is a stateful program that
+can be paused, forked, edited, and re-executed. This enables a simple but
+useful search problem: find the smallest intervention that flips the final
+benchmark outcome.
+
+This workshop paper is methodology-first. We do not claim benchmark-wide repair
+at this stage. Instead, we contribute a concrete protocol built around
+checkpointed replay, structured patch families, bounded search cost, and
+autopsy generation, together with a now-frozen workshop corpus over saved
+tau-style failures in retail and airline domains.
+
+Existing work mostly predicts or explains where an agent failed from traces. We
+instead search for the smallest executable intervention that causally flips the
+benchmark outcome under replay, yielding both a repair and a root-cause
+autopsy. That difference matters: our unit of analysis is not only a suspect
+step, but a benchmark-native reward flip produced by checkpointed replay,
+minimal patch size, explicit search-cost accounting, and strict non-oracle
+continuation after the intervention.
+
+\section{Method}
+
+\begin{figure}[t]
+\centering
+\fbox{%
+\parbox{0.96\linewidth}{%
+\small
+\textbf{Failed trace}
+$\rightarrow$
+\textbf{restore ranked snapshot}
+$\rightarrow$
+\textbf{propose structured patch}
+$\rightarrow$
+\textbf{replay under strict continuation}
+$\rightarrow$
+\textbf{benchmark evaluator}
+$\rightarrow$
+\textbf{minimal successful patch}
+$\rightarrow$
+\textbf{autopsy report}
+
+\medskip
+The key distinction is executable counterfactual repair: we intervene on saved
+environment state, not only on textual explanations of the trace.
+}%
+}
+\caption{Replayable execution intervention treats a failed agent trajectory as a
+stateful program that can be paused, patched, replayed, and scored by the
+original benchmark evaluator.}
+\label{fig:execution_intervention_pipeline}
+\end{figure}
+
+For a failed trajectory, we log per-step prompt context, chosen action, tool
+result, and pre/post execution snapshots. A patch candidate specifies a target
+step, a patch family, and a small structured payload. Applying a patch means:
+\begin{enumerate}
+  \item restore the saved pre-step snapshot;
+  \item edit the action or context according to the patch payload;
+  \item resume execution under a bounded continuation policy;
+  \item evaluate the replayed rollout with the original benchmark evaluator.
+\end{enumerate}
+
+\begin{algorithm}[t]
+\caption{Minimal Patch Recovery via Checkpointed Replay}
+\label{alg:minimal_patch_recovery}
+\begin{algorithmic}[1]
+\Require failed trajectory $\tau$, ranked steps $\mathcal{T}$, patch families $\mathcal{F}$, search budget $B$
+\State $p^\star \gets \varnothing$
+\For{$t \in \mathcal{T}$ in ranked order}
+  \State restore the saved pre-step snapshot at step $t$
+  \For{$f \in \mathcal{F}$}
+    \For{$p \in \textsc{ProposePatches}(\tau, t, f, B)$}
+      \State replay from the restored snapshot with patch $p$
+      \State continue under a bounded strict continuation policy
+      \State evaluate the replayed rollout with the benchmark reward
+      \If{$R(\tau'(p)) = 1$}
+        \If{$p^\star = \varnothing$ or $p$ is smaller/cheaper than $p^\star$}
+          \State $p^\star \gets p$
+        \EndIf
+      \EndIf
+    \EndFor
+  \EndFor
+\EndFor
+\State \Return winning patch $p^\star$ and its autopsy report, or \texttt{not recovered}
+\end{algorithmic}
+\end{algorithm}
+
+The current system supports structured intervention families including tool
+argument edits, tool-call replacement, insertion, deletion, context edits, and
+continuation replacement. Search returns the smallest successful patch under a
+budget over localization, proposal, and replay. The output is not only a
+success flag: it is also an autopsy artifact with the root-cause step, patch
+family, patch size, total search cost, and before/after state fragments.
+
+The workshop implementation also includes three simple rerun baselines:
+\begin{itemize}
+  \item retry from scratch,
+  \item retry from the localized snapshot without structured patching,
+  \item raw continuation from the localized snapshot while preserving the
+  original failing action.
+\end{itemize}
+
+\section{Workshop Evaluation Scope}
+
+The workshop path stays tau-native and focuses on retail plus airline. The
+frozen corpus currently contains $40$ retail plus $40$ airline natural
+failures, together with $12$ retail plus $12$ airline synthetic failures. The
+main headline setting is strict non-oracle replay: after patching a saved
+failure, the system must continue from the replayed state without reusing
+oracle future actions. Oracle continuation is retained only as an upper-bound
+analysis.
+
+The workshop comparison frame is methodology-first with early real-environment
+evidence rather than benchmark-scale repair claims. The intended ablation set
+includes no repair, random candidate / random localization, reverse search,
+tool-deletion-only search, continuation-replacement-only search, and the
+oracle suffix upper bound. The corpus scale has already moved from the earlier
+thirty-two-case smoke setting to a frozen $80$-case natural corpus. The final
+artifact-backed workshop tables now show $27/80$ strict natural recoveries
+($33.8\%$), $35/80$ oracle-upper-bound recoveries ($43.8\%$), and retry-baseline
+recoveries of $15/80$ from scratch, $7/80$ from a localized snapshot, and
+$3/80$ for raw continuation from the failing action. On the frozen $24$-case
+synthetic corpus, heuristic search reaches $24/24$ recovery with perfect
+top-1 localization.
+
+The codebase now supports the full workshop artifact path: building natural and
+synthetic corpora, running structured patch search, running retry baselines,
+exporting tables and figure CSVs, and generating reviewer-facing artifact
+bundles. The artifact layer now uses resumable JSONL outputs and sharded
+failure corpora so the frozen workshop release can be regenerated without
+eagerly materializing a multi-gigabyte corpus in memory. In the current repo
+state, the workshop release now includes saved oracle autopsies, paper tables,
+figure CSVs, and a curated three-case study bundle over the frozen artifacts.
+
+\subsection*{Workshop Results}
+
+Table~\ref{tab:workshop_natural_results} summarizes the main natural-failure
+comparison. Under strict non-oracle replay, structured patch search recovers
+$27/80$ failures, compared with $15/80$ for retry from scratch, $7/80$ for
+retry from a localized snapshot, and $3/80$ for raw continuation from the
+failing step. The oracle upper bound
+recovers $35/80$, leaving an eight-case strict-versus-oracle gap that is more
+about continuation quality than fault localization alone.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Method & Recov. & SRR & Tokens & Med. cost \\
+\midrule
+Structured patch search (strict) & 27/80 & 0.338 & 8751 & 61.0 \\
+Oracle upper bound & 35/80 & 0.438 & 9698 & 61.0 \\
+Retry from scratch & 15/80 & 0.188 & 199323 & 2561.0 \\
+Retry from localized snapshot & 7/80 & 0.088 & 349895 & 3827.0 \\
+Raw continuation from snapshot & 3/80 & 0.038 & 228922 & 3343.0 \\
+\bottomrule
+\end{tabular}
+\caption{Workshop natural-failure results on the frozen $80$-case retail plus
+airline corpus. Structured patch search outperforms the simple rerun-style
+baselines under the same saved-failure protocol.}
+\label{tab:workshop_natural_results}
+\end{table}
+
+The natural results also show a clear domain imbalance. In strict mode, the
+current workshop system recovers $22/40$ airline failures but only $5/40$
+retail failures. Under the oracle upper bound, airline rises only slightly to
+$23/40$, while retail rises to $12/40$. This pattern is consistent with our
+core claim: better continuation helps, but the benchmark-native replay
+interventions are already exposing where simple deletion-style repair works and
+where richer continuation or context repair is still needed.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrr}
+\toprule
+Successful natural patch family & Strict & Oracle \\
+\midrule
+Tool deletion & 27 & 33 \\
+Tool call with oracle suffix & 0 & 2 \\
+\bottomrule
+\end{tabular}
+\caption{Successful natural patch-family distribution in the frozen workshop
+release. The current natural recoveries are dominated by deletion-style local
+repairs, which helps explain why airline benefits more than retail under the
+present workshop method.}
+\label{tab:workshop_patch_families}
+\end{table}
+
+Table~\ref{tab:workshop_synthetic_results} summarizes the frozen synthetic
+corpus. Heuristic search reaches perfect $24/24$ recovery with exact top-1
+localization, while weaker step-order baselines degrade in predictable ways:
+chronological search recovers only $7/24$ and random candidate search recovers
+$15/24$.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Strategy & Recov. & SRR & Top-1 & MRR \\
+\midrule
+Heuristic & 24/24 & 1.000 & 1.000 & 1.000 \\
+Reverse & 24/24 & 1.000 & 1.000 & 1.000 \\
+Latest only & 24/24 & 1.000 & 1.000 & 1.000 \\
+Oracle fault step & 24/24 & 1.000 & 1.000 & 1.000 \\
+Random candidate & 15/24 & 0.625 & 0.583 & 0.684 \\
+Chronological & 7/24 & 0.292 & 0.208 & 0.378 \\
+No repair & 0/24 & 0.000 & 0.000 & 0.500 \\
+\bottomrule
+\end{tabular}
+\caption{Workshop synthetic results on the frozen $24$-case controlled corpus.
+Synthetic failures let us measure localization and recovery separately.}
+\label{tab:workshop_synthetic_results}
+\end{table}
+
+These synthetic results are intentionally clean because the corruption suite is
+controlled rather than ecological: each case injects a known single-step fault
+into an otherwise replay-clean trajectory, primarily around tool-argument
+mutations. The synthetic table is therefore a sanity-check for localization and
+minimality, not a claim that natural benchmark failures are equally easy.
+
+\subsection*{Concrete Autopsy Example}
+
+One representative recovered retail case starts with an incorrect identity
+lookup:
+\begin{quote}
+\small\ttfamily
+find\_user\_id\_by\_email(email="aarav.santos8321@example.com")
+\end{quote}
+The minimal successful patch changes only the email string:
+\begin{quote}
+\small\ttfamily
+find\_user\_id\_by\_email(email="aarav.santos8320@example.com")
+\end{quote}
+From that patched snapshot, strict replay with a bounded continuation proposal
+reaches a successful rollout. This example is useful because it isolates the
+paper's target behavior: a tiny executable patch flips the benchmark reward,
+while the recovered rollout simultaneously serves as a causal autopsy. In
+contrast, some airline recoveries are even smaller and succeed by deleting a
+harmful mutating action altogether, showing that both continuation-style repair
+and deletion-style repair appear in natural failures.
+
+\section{Related Work}
+
+Our work sits between benchmark evaluation for interactive agents and
+post-hoc repair or deliberation methods for language models.
+
+\paragraph{Interactive agent benchmarks.}
+Recent benchmarks such as tau-style environments, WebArena, WorkArena,
+AgentDojo, and SWE-bench make agent execution state, tools, and outcome
+evaluation central to the task definition
+\citep{tau_style,web_arena,work_arena,agent_dojo,swe_bench}. These benchmarks
+are valuable because they expose realistic multi-step failures. Our goal is not
+to propose another benchmark, but to turn benchmark trajectories into
+debuggable execution objects by adding checkpointed intervention and replay.
+
+\paragraph{Reasoning, reflection, and retry.}
+ReAct established the interleaved reasoning-and-acting trajectory format that
+many later agent systems and benchmarks inherit \citep{react}. Methods such as
+Reflexion, Self-Refine, and Tree of Thoughts improve behavior through critique,
+self-correction, or explicit search \citep{reflexion,self_refine,tree_of_thoughts}.
+These methods usually operate in prompt space: they revise, deliberate, or
+retry, but they do not center the search for the smallest executable patch that
+changes the replayed benchmark outcome.
+
+\paragraph{Intervention-supported attribution.}
+The closest recent threat is REFLECT, which also uses intervention-supported
+replay to strengthen attribution for silent failures in agent traces
+\citep{reflect}. Our emphasis is narrower and more repair-oriented: we search
+over explicit patch families, require benchmark-native reward flipping under
+strict non-oracle continuation, and report patch minimality plus search cost as
+first-class outputs alongside the autopsy.
+
+\paragraph{Program repair and debugging perspective.}
+The closest conceptual analogy is automated debugging or program repair, where
+one searches for a small change that fixes downstream behavior. Our setting is
+harder in some ways because the trajectory mixes language, tool calls, and
+mutable environment state. At the same time, benchmark-native replay gives us a
+clean reward signal and exact state restoration, which makes causal debugging
+practical. This connects our workshop framing to classical fault localization,
+delta debugging, automated program repair, and minimal counterfactual
+explanations \citep{fault_localization,delta_debugging,program_repair,minimal_counterfactuals}.
+
+\section{Artifact Summary}
+
+The frozen workshop release now supports the following paper-facing claims and
+artifacts:
+\begin{itemize}
+  \item real tau-native replay exists for retail and airline;
+  \item the workshop corpora are frozen at $80$ natural and $24$ synthetic
+  cases;
+  \item saved natural failures are imported only if they remain failures under
+  exact replay;
+  \item strict non-oracle natural recovery is no longer only synthetic, with
+  artifact-backed retail continuation recovery and airline deletion recovery;
+  \item the workshop artifacts now save $27/80$ strict natural
+  recoveries, $35/80$ oracle-upper-bound recoveries, and retry baselines of
+  $15/80$ from scratch, $7/80$ from a localized snapshot, and $3/80$ for raw
+  continuation;
+  \item workshop-specific retry baselines and artifact bundling are implemented
+  in the experiment harness;
+  \item the workshop artifact path now includes saved oracle autopsies, paper
+  tables, figure CSVs, and a curated three-case workshop panel.
+\end{itemize}
+
+The most important gaps to a full conference version are still:
+\begin{itemize}
+  \item hosted retry baselines at a scale beyond free-tier request caps,
+  \item stronger non-oracle continuation at scale,
+  \item broader baseline coverage,
+  \item human evaluation of autopsy usefulness.
+\end{itemize}
+
+\section{Limitations and Next Steps}
+
+The current system is still limited by continuation quality, patch-family
+coverage, and experiment scale. Some failures are easy to localize but hard to
+repair without a stronger continuation proposer. Others likely require context
+editing or multi-step intervention beyond the current one-step framework. The
+next milestone is to scale beyond the already-frozen $80$/$24$ workshop
+release, strengthen non-oracle continuation, and evaluate whether these saved
+autopsies remain useful when recovery rates drop on broader natural-failure
+corpora.
+
+\bibliographystyle{colm2026_conference}
+\bibliography{references}
+
+\end{document}
