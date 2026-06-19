@@ -172,6 +172,29 @@ The workshop implementation also includes three simple rerun baselines:
   original failing action.
 \end{itemize}
 
+\paragraph{Cost accounting and proxies.}
+To evaluate search efficiency across deterministic and stochastic execution
+paths, we use a dual cost-accounting protocol. For online baselines that call
+OpenRouter, we report provider-returned token usage from billing metadata. For
+the deterministic patch engine, we optimize an internal analytical cost model
+$C(P)$ rather than a provider-specific tokenizer. This makes the search-cost
+metric reproducible across runs and hardware settings, and avoids coupling the
+core method to a changing external tokenizer.
+\begin{equation}
+C(P) = C_{\text{local}} + C_{\text{patch}} + C_{\text{replay}} + C_{\text{cont}} .
+\end{equation}
+Here $C_{\text{local}} = \rho \cdot |S_{\text{ranked}}|$ penalizes rollback and
+step ranking depth, with default $\rho = 8$. $C_{\text{patch}}$ is a structural
+penalty determined by patch family plus a length proxy from standardized text
+serialization: for example, tool-argument edits carry a base penalty of $10$,
+tool-call replacement $12$, context edits $6$, and deletions $4$, each plus a
+whitespace-token length term where applicable. $C_{\text{replay}}$ and
+$C_{\text{cont}}$ capture replay and continuation overhead, including bounded
+continuation proposals generated during deterministic replay. We therefore
+report efficiency as a unified search-cost accounting layer, while explicitly
+distinguishing actual API tokens from analytical proxy units when discussing
+specific methods.
+
 \section{Workshop Evaluation Scope}
 
 The workshop path stays tau-native and focuses on retail plus airline. The
@@ -212,14 +235,18 @@ $27/80$ failures, compared with $15/80$ for retry from scratch, $7/80$ for
 retry from a localized snapshot, and $3/80$ for raw continuation from the
 failing step. The oracle upper bound
 recovers $35/80$, leaving an eight-case strict-versus-oracle gap that is more
-about continuation quality than fault localization alone.
+about continuation quality than fault localization alone. The retry baselines
+also highlight a practical context-window bottleneck: naive rerun-style
+continuation consumes between $199{,}323$ and $349{,}895$ provider-reported
+tokens on the frozen corpus, showing that unguided long-horizon retry quickly
+becomes expensive and increasingly brittle as the execution history grows.
 
 \begin{table}[t]
 \centering
 \small
 \begin{tabular}{lrrrr}
 \toprule
-Method & Recov. & SRR & Tokens & Med. cost \\
+Method & Recov. & SRR & Cost metric$^{*}$ & Median$^{*}$ \\
 \midrule
 Structured patch search (strict) & 27/80 & 0.338 & 8751 & 61.0 \\
 Oracle upper bound & 35/80 & 0.438 & 9698 & 61.0 \\
@@ -231,6 +258,16 @@ Raw continuation from snapshot & 3/80 & 0.038 & 228922 & 3343.0 \\
 \caption{Workshop natural-failure results on the frozen $80$-case retail plus
 airline corpus. Structured patch search outperforms the simple rerun-style
 baselines under the same saved-failure protocol.}
+\vspace{0.25em}
+
+\begin{minipage}{0.96\linewidth}
+\footnotesize
+$^{*}$ Structured patch search and the oracle upper bound report the analytical
+search-cost model described in the text. Retry baselines report actual
+provider-returned API token usage. These values should therefore be interpreted
+as an efficiency accounting layer rather than a single billing-equivalent
+tokenizer.
+\end{minipage}
 \label{tab:workshop_natural_results}
 \end{table}
 
