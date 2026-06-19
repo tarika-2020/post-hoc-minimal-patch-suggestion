@@ -53,8 +53,8 @@ actions. The frozen workshop corpus now contains $80$ replay-failing natural
 cases and $24$ controlled synthetic failures across retail and airline. On the
 updated workshop artifacts, structured strict replay recovers $27/80$ natural
 failures, the oracle upper bound reaches $35/80$, and the strongest simple retry
-baseline recovers $15/80$; on the synthetic corpus, heuristic localization
-recovers $24/24$ with perfect top-1 localization. These results motivate
+baseline recovers $15/80$ natural failures. On the synthetic corpus, heuristic
+localization recovers $24/24$ with perfect top-1 localization. These results motivate
 replayable execution intervention as a practical debugging protocol for LLM
 agents: more causal than prompt-only retry, more interpretable than
 unconstrained regeneration, and naturally aligned with benchmark evaluation.
@@ -368,7 +368,7 @@ Our work sits between benchmark evaluation for interactive agents and
 post-hoc repair or deliberation methods for language models.
 
 \paragraph{Interactive agent benchmarks.}
-Recent benchmarks such as tau-style environments, WebArena, WorkArena,
+Recent benchmarks such as $\tau$-style environments, WebArena, WorkArena,
 AgentDojo, and SWE-bench make agent execution state, tools, and outcome
 evaluation central to the task definition
 \citep{tau_style,web_arena,work_arena,agent_dojo,swe_bench}. These benchmarks
@@ -386,7 +386,7 @@ retry, but they do not center the search for the smallest executable patch that
 changes the replayed benchmark outcome.
 
 \paragraph{Intervention-supported attribution.}
-The closest recent threat is REFLECT, which also uses intervention-supported
+The closest related work is REFLECT, which also uses intervention-supported
 replay to strengthen attribution for silent failures in agent traces
 \citep{reflect}. Our emphasis is narrower and more repair-oriented: we search
 over explicit patch families, require benchmark-native reward flipping under
