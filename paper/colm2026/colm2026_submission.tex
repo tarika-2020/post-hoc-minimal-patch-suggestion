@@ -138,7 +138,7 @@ step, a patch family, and a small structured payload. Applying a patch means:
 \begin{algorithmic}[1]
 \Require failed trajectory $\tau$, ranked steps $\mathcal{T}$, patch families $\mathcal{F}$, search budget $B$
 \State $p^\star \gets \varnothing$
-\For{$t \in \mathcal{T}$ in ranked order}
+\For{each $t \in \mathcal{T}$ in ranked order}
   \State restore the saved pre-step snapshot at step $t$
   \For{$f \in \mathcal{F}$}
     \For{$p \in \textsc{ProposePatches}(\tau, t, f, B)$}
@@ -183,7 +183,7 @@ core method to a changing external tokenizer.
 \begin{equation}
 C(P) = C_{\text{local}} + C_{\text{patch}} + C_{\text{replay}} + C_{\text{cont}} .
 \end{equation}
-Here $C_{\text{local}} = \rho \cdot |S_{\text{ranked}}|$ penalizes rollback and
+Here $C_{\text{local}} = \rho \cdot \left|S_{\text{ranked}}\right|$ penalizes rollback and
 step ranking depth, with default $\rho = 8$. $C_{\text{patch}}$ is a structural
 penalty determined by patch family plus a length proxy from standardized text
 serialization: for example, tool-argument edits carry a base penalty of $10$,
