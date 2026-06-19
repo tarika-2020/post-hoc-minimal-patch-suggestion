@@ -76,8 +76,8 @@ can be paused, forked, edited, and re-executed. This enables a simple but
 useful search problem: find the smallest intervention that flips the final
 benchmark outcome.
 
-This workshop paper is methodology-first. We do not claim benchmark-wide repair
-at this stage. Instead, we contribute a concrete protocol built around
+This submission is methodology-first. We do not claim benchmark-wide repair at
+this stage. Instead, we contribute a concrete protocol built around
 checkpointed replay, structured patch families, bounded search cost, and
 autopsy generation, together with a now-frozen workshop corpus over saved
 tau-style failures in retail and airline domains.
@@ -195,14 +195,14 @@ $3/80$ for raw continuation from the failing action. On the frozen $24$-case
 synthetic corpus, heuristic search reaches $24/24$ recovery with perfect
 top-1 localization.
 
-The codebase now supports the full workshop artifact path: building natural and
-synthetic corpora, running structured patch search, running retry baselines,
-exporting tables and figure CSVs, and generating reviewer-facing artifact
-bundles. The artifact layer now uses resumable JSONL outputs and sharded
-failure corpora so the frozen workshop release can be regenerated without
-eagerly materializing a multi-gigabyte corpus in memory. In the current repo
-state, the workshop release now includes saved oracle autopsies, paper tables,
-figure CSVs, and a curated three-case study bundle over the frozen artifacts.
+The workshop artifact pipeline supports building natural and synthetic corpora,
+running structured patch search and retry baselines, exporting tables and
+figure CSVs, and generating reviewer-facing bundles. The artifact layer uses
+resumable JSONL outputs and sharded failure corpora so the frozen workshop
+release can be regenerated without eagerly materializing a multi-gigabyte
+corpus in memory. The artifact package includes saved oracle autopsies, paper
+tables, figure CSVs, and a curated three-case study bundle over the frozen
+artifacts.
 
 \subsection*{Workshop Results}
 
@@ -242,6 +242,17 @@ core claim: better continuation helps, but the benchmark-native replay
 interventions are already exposing where simple deletion-style repair works and
 where richer continuation or context repair is still needed.
 
+An important empirical finding is that the strict natural recoveries in the
+frozen workshop corpus are currently deletion-dominated rather than broadly
+distributed across all patch families. We view this as informative rather than
+embarrassing. Many replay-failing airline cases contain harmful extra or
+mutating actions, so minimal deletion is exactly the kind of executable
+counterfactual that should flip the evaluator outcome if the suspected action
+is truly causal. The retail gap to the oracle upper bound suggests a different
+failure mode: those cases appear less blocked by local harmful actions and more
+blocked by downstream continuation quality, context selection, or multi-step
+identity repair.
+
 \begin{table}[t]
 \centering
 \small
@@ -254,9 +265,9 @@ Tool call with oracle suffix & 0 & 2 \\
 \bottomrule
 \end{tabular}
 \caption{Successful natural patch-family distribution in the frozen workshop
-release. The current natural recoveries are dominated by deletion-style local
-repairs, which helps explain why airline benefits more than retail under the
-present workshop method.}
+release. The strict leaderboard is deletion-dominated, suggesting that many
+recoverable airline failures arise from harmful extra or mutating actions,
+while retail more often appears continuation-limited under the current method.}
 \label{tab:workshop_patch_families}
 \end{table}
 
