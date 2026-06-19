@@ -44,8 +44,13 @@ PRODUCT_ID_RE = re.compile(r"\b\d{10}\b")
 PAYMENT_METHOD_RE = re.compile(r"\b(?:paypal|credit_card|gift_card|bank_account)_[0-9]+\b")
 ITEM_ID_FIELD_RE = re.compile(r"item_id='(\d+)'")
 PRODUCT_ID_FIELD_RE = re.compile(r"product_id='(\d+)'")
+PLACEHOLDER_TEXT_RE = re.compile(
+    r"(<[^>]+>)|(\bto be filled\b)|(\bplaceholder\b)|(\btbd\b)",
+    re.IGNORECASE,
+)
 
 SELECTED_DISTRIBUTION_NAMES = ["tau2", "litellm", "openai", "pydantic", "httpx"]
+WORKSHOP_PAPER_TITLE = "Minimal Execution Patches for Causal Debugging of Tool-Using Agents"
 
 
 DOMAIN_LOADERS = {
@@ -264,8 +269,12 @@ def serialize_dataclass(value: Any) -> Any:
 
 def save_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(payload, handle, indent=2, default=serialize_dataclass)
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(path)
 
 
 def serialize_patch_search_result(
@@ -315,12 +324,16 @@ def write_jsonl(path: Path, rows: list[Any]) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         for row in rows:
             handle.write(json.dumps(row, default=serialize_dataclass) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def append_jsonl(path: Path, row: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, default=serialize_dataclass) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def iter_jsonl(path: Path) -> Iterator[Any]:
@@ -860,6 +873,16 @@ def mutate_scalar(value: Any) -> Any:
     if isinstance(value, float):
         return value + 1.0
     return value
+
+
+def contains_placeholder_text(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(PLACEHOLDER_TEXT_RE.search(value))
+    if isinstance(value, dict):
+        return any(contains_placeholder_text(item) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_placeholder_text(item) for item in value)
+    return False
 
 
 def mutate_action(action: TauAction) -> tuple[TauAction, str]:
@@ -1519,7 +1542,8 @@ class OpenRouterProposer(BaseProposer):
             model_slug=model_slug or "openai/gpt-4.1-mini",
         )
         self.adapter = adapter
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        raw_api_key = api_key or os.getenv("OPENROUTER_API_KEY") or ""
+        self.api_key = raw_api_key.strip() or None
 
     def _request_actions(
         self,
@@ -1608,6 +1632,7 @@ class OpenRouterProposer(BaseProposer):
             return [], metadata
         normalized_actions: list[JsonDict] = []
         invalid_tool_names: list[str] = []
+        placeholder_actions: list[str] = []
         for index, action in enumerate(proposed_actions[: budget.continuation_horizon]):
             if not isinstance(action, dict):
                 continue
@@ -1618,6 +1643,9 @@ class OpenRouterProposer(BaseProposer):
                 continue
             if not self.adapter.has_tool(name):
                 invalid_tool_names.append(str(name))
+                continue
+            if contains_placeholder_text(arguments):
+                placeholder_actions.append(str(name))
                 continue
             normalized_actions.append(
                 {
@@ -1631,19 +1659,37 @@ class OpenRouterProposer(BaseProposer):
             )
         if not normalized_actions:
             metadata.status = "empty"
+            error_parts: list[str] = []
             if invalid_tool_names:
                 unique_names = sorted(set(invalid_tool_names))
-                metadata.error = (
-                    "Model proposed only invalid tool names: "
+                error_parts.append(
+                    "Model proposed invalid tool names: "
                     + ", ".join(unique_names[:8])
                 )
+            if placeholder_actions:
+                unique_names = sorted(set(placeholder_actions))
+                error_parts.append(
+                    "Model proposed placeholder arguments for: "
+                    + ", ".join(unique_names[:8])
+                )
+            if error_parts:
+                metadata.error = " | ".join(error_parts)
             return [], metadata
+        warning_parts: list[str] = []
         if invalid_tool_names:
             unique_names = sorted(set(invalid_tool_names))
-            metadata.error = (
+            warning_parts.append(
                 "Dropped invalid tool names: "
                 + ", ".join(unique_names[:8])
             )
+        if placeholder_actions:
+            unique_names = sorted(set(placeholder_actions))
+            warning_parts.append(
+                "Dropped placeholder arguments for: "
+                + ", ".join(unique_names[:8])
+            )
+        if warning_parts:
+            metadata.error = " | ".join(warning_parts)
         return (
             [
                 ContinuationCandidate(
@@ -4331,32 +4377,66 @@ def make_workshop_bundle_cli(
     release_lines = [
         "# Workshop Release",
         "",
-        f"- Title: `Execution Intervention for Post-Hoc Debugging of LLM Agent Trajectories`",
+        f"- Title: `{WORKSHOP_PAPER_TITLE}`",
         f"- Natural corpus entries: `{natural_corpus_summary['entry_count']}`",
         f"- Synthetic corpus entries: `{synthetic_corpus_summary['entry_count']}`",
         f"- Strict natural recovery: `{strict_summary['recovered_count']} / {strict_summary['failure_count']}`",
         f"- Oracle natural recovery: `{oracle_summary['recovered_count']} / {oracle_summary['failure_count']}`",
-        f"- Retry baselines: `{retry_variants}`",
-        "",
-        "## Artifact Map",
-        "",
-        f"- Natural corpus: `{natural_corpus_dir}`",
-        f"- Synthetic corpus: `{synthetic_corpus_dir}`",
-        f"- Strict search: `{strict_dir}`",
-        f"- Oracle upper bound: `{oracle_dir}`",
-        f"- Retry baselines: `{retry_dir}`",
-        f"- Synthetic comparison: `{synthetic_compare_dir}`",
-        f"- Budget sweep: `{budget_dir}`",
-        f"- Paper tables: `{tables_dir}`",
-        f"- Case studies: `{case_dir}`",
-        f"- Reviewer guide: `{guide_dir}`",
+        "- Retry baselines:",
     ]
+    for summary in baseline_report.get("summaries", []):
+        release_lines.append(
+            f"  - `{summary['method_variant']} = {summary['recovered_count']} / {summary['failure_count']}`"
+        )
+    release_lines.extend(
+        [
+            "",
+            "## Artifact Map",
+            "",
+            f"- Natural corpus: `{natural_corpus_dir}`",
+            f"- Synthetic corpus: `{synthetic_corpus_dir}`",
+            f"- Strict search: `{strict_dir}`",
+            f"- Oracle upper bound: `{oracle_dir}`",
+            f"- Retry baselines: `{retry_dir}`",
+            f"- Synthetic comparison: `{synthetic_compare_dir}`",
+            f"- Budget sweep: `{budget_dir}`",
+            f"- Paper tables: `{tables_dir}`",
+            f"- Case studies: `{case_dir}`",
+            f"- Reviewer guide: `{guide_dir}`",
+        ]
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     with (output_dir / "WORKSHOP_RELEASE.md").open("w", encoding="utf-8") as handle:
         handle.write("\n".join(release_lines) + "\n")
+    release_manifest = {
+        "title": WORKSHOP_PAPER_TITLE,
+        "natural_entries": natural_corpus_summary["entry_count"],
+        "synthetic_entries": synthetic_corpus_summary["entry_count"],
+        "strict_recovery": {
+            "recovered_count": strict_summary["recovered_count"],
+            "failure_count": strict_summary["failure_count"],
+        },
+        "oracle_recovery": {
+            "recovered_count": oracle_summary["recovered_count"],
+            "failure_count": oracle_summary["failure_count"],
+        },
+        "retry_baselines": baseline_report.get("summaries", []),
+        "artifact_map": {
+            "natural_corpus": str(natural_corpus_dir),
+            "synthetic_corpus": str(synthetic_corpus_dir),
+            "strict_search": str(strict_dir),
+            "oracle_upper_bound": str(oracle_dir),
+            "retry_baselines": str(retry_dir),
+            "synthetic_comparison": str(synthetic_compare_dir),
+            "budget_sweep": str(budget_dir),
+            "paper_tables": str(tables_dir),
+            "case_studies": str(case_dir),
+            "reviewer_guide": str(guide_dir),
+        },
+    }
     report = {
         "name": name,
-        "title": "Execution Intervention for Post-Hoc Debugging of LLM Agent Trajectories",
+        "title": WORKSHOP_PAPER_TITLE,
         "natural_domain_specs": natural_domain_specs,
         "natural_limit_per_domain": natural_limit_per_domain,
         "synthetic_domains": synthetic_domains,
@@ -4376,6 +4456,7 @@ def make_workshop_bundle_cli(
         "strict_summary": strict_summary,
         "strict_autopsy": strict_autopsy,
         "baseline_report": baseline_report,
+        "retry_baseline_report": baseline_report,
         "oracle_summary": oracle_summary,
         "oracle_autopsy": oracle_autopsy,
         "synthetic_report": synthetic_report,
@@ -4384,6 +4465,7 @@ def make_workshop_bundle_cli(
         "table_report": table_report,
         "case_report": case_report,
         "artifact_guide": artifact_guide,
+        "release_manifest": release_manifest,
         "paths": {
             "natural_corpus_dir": str(natural_corpus_dir),
             "synthetic_corpus_dir": str(synthetic_corpus_dir),

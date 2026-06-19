@@ -8,7 +8,7 @@
   \neuripsstylefalse
   \usepackage[margin=1in]{geometry}
   \usepackage[numbers]{natbib}
-  \usepackage[colorlinks=true,allcolors=blue]{hyperref}
+  \usepackage[colorlinks=true,allcolors=blue,hypertexnames=false]{hyperref}
 }
 
 \usepackage[utf8]{inputenc}
@@ -53,9 +53,9 @@ retail and airline settings, including continuation-based recovery after an
 identity-lookup repair and deletion-based recovery for harmful mutating
 actions. The frozen workshop corpus now contains $80$ replay-failing natural
 cases and $24$ controlled synthetic failures across retail and airline. On the
-saved workshop release, structured strict replay recovers $27/80$ natural
-failures, the oracle upper bound reaches $35/80$, and the best simple retry
-baseline recovers $3/80$; on the synthetic corpus, heuristic localization
+updated workshop artifacts, structured strict replay recovers $27/80$ natural
+failures, the oracle upper bound reaches $35/80$, and the strongest simple retry
+baseline recovers $15/80$; on the synthetic corpus, heuristic localization
 recovers $24/24$ with perfect top-1 localization. These results motivate
 replayable execution intervention as a practical debugging protocol for LLM
 agents: more causal than prompt-only retry, more interpretable than
@@ -190,9 +190,10 @@ includes no repair, random candidate / random localization, reverse search,
 tool-deletion-only search, continuation-replacement-only search, and the
 oracle suffix upper bound. The corpus scale has already moved from the earlier
 thirty-two-case smoke setting to a frozen $80$-case natural corpus. The final
-saved workshop artifacts now show $27/80$ strict natural recoveries
-($33.8\%$), $35/80$ oracle-upper-bound recoveries ($43.8\%$), and at most
-$3/80$ recoveries for the simple retry baselines. On the frozen $24$-case
+artifact-backed workshop tables now show $27/80$ strict natural recoveries
+($33.8\%$), $35/80$ oracle-upper-bound recoveries ($43.8\%$), and retry-baseline
+recoveries of $15/80$ from scratch, $7/80$ from a localized snapshot, and
+$3/80$ for raw continuation from the failing action. On the frozen $24$-case
 synthetic corpus, heuristic search reaches $24/24$ recovery with perfect
 top-1 localization.
 
@@ -204,6 +205,95 @@ failure corpora so the frozen workshop release can be regenerated without
 eagerly materializing a multi-gigabyte corpus in memory. In the current repo
 state, the workshop release now includes saved oracle autopsies, paper tables,
 figure CSVs, and a curated three-case study bundle over the frozen artifacts.
+
+\subsection*{Workshop Results}
+
+Table~\ref{tab:workshop_natural_results} summarizes the main natural-failure
+comparison. Under strict non-oracle replay, structured patch search recovers
+$27/80$ failures, compared with $15/80$ for retry from scratch, $7/80$ for
+retry from a localized snapshot, and $3/80$ for raw continuation from the
+failing step. The oracle upper bound
+recovers $35/80$, leaving an eight-case strict-versus-oracle gap that is more
+about continuation quality than fault localization alone.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Method & Recov. & SRR & Tokens & Med. cost \\
+\midrule
+Structured patch search (strict) & 27/80 & 0.338 & 8751 & 61.0 \\
+Oracle upper bound & 35/80 & 0.438 & 9698 & 61.0 \\
+Retry from scratch & 15/80 & 0.188 & 199323 & 2561.0 \\
+Retry from localized snapshot & 7/80 & 0.088 & 349895 & 3827.0 \\
+Raw continuation from snapshot & 3/80 & 0.038 & 228922 & 3343.0 \\
+\bottomrule
+\end{tabular}
+\caption{Workshop natural-failure results on the frozen $80$-case retail plus
+airline corpus. Structured patch search outperforms the simple rerun-style
+baselines under the same saved-failure protocol.}
+\label{tab:workshop_natural_results}
+\end{table}
+
+The natural results also show a clear domain imbalance. In strict mode, the
+current workshop system recovers $22/40$ airline failures but only $5/40$
+retail failures. Under the oracle upper bound, airline rises only slightly to
+$23/40$, while retail rises to $12/40$. This pattern is consistent with our
+core claim: better continuation helps, but the benchmark-native replay
+interventions are already exposing where simple deletion-style repair works and
+where richer continuation or context repair is still needed.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrr}
+\toprule
+Successful natural patch family & Strict & Oracle \\
+\midrule
+Tool deletion & 27 & 33 \\
+Tool call with oracle suffix & 0 & 2 \\
+\bottomrule
+\end{tabular}
+\caption{Successful natural patch-family distribution in the frozen workshop
+release. The current natural recoveries are dominated by deletion-style local
+repairs, which helps explain why airline benefits more than retail under the
+present workshop method.}
+\label{tab:workshop_patch_families}
+\end{table}
+
+Table~\ref{tab:workshop_synthetic_results} summarizes the frozen synthetic
+corpus. Heuristic search reaches perfect $24/24$ recovery with exact top-1
+localization, while weaker step-order baselines degrade in predictable ways:
+chronological search recovers only $7/24$ and random candidate search recovers
+$15/24$.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Strategy & Recov. & SRR & Top-1 & MRR \\
+\midrule
+Heuristic & 24/24 & 1.000 & 1.000 & 1.000 \\
+Reverse & 24/24 & 1.000 & 1.000 & 1.000 \\
+Latest only & 24/24 & 1.000 & 1.000 & 1.000 \\
+Oracle fault step & 24/24 & 1.000 & 1.000 & 1.000 \\
+Random candidate & 15/24 & 0.625 & 0.583 & 0.684 \\
+Chronological & 7/24 & 0.292 & 0.208 & 0.378 \\
+No repair & 0/24 & 0.000 & 0.000 & 0.500 \\
+\bottomrule
+\end{tabular}
+\caption{Workshop synthetic results on the frozen $24$-case controlled corpus.
+Synthetic failures let us measure localization and recovery separately.}
+\label{tab:workshop_synthetic_results}
+\end{table}
+
+These synthetic results are intentionally clean because the corruption suite is
+controlled rather than ecological: each case injects a known single-step fault
+into an otherwise replay-clean trajectory, primarily around tool-argument
+mutations. The synthetic table is therefore a sanity-check for localization and
+minimality, not a claim that natural benchmark failures are equally easy.
 
 \subsection*{Concrete Autopsy Example}
 
@@ -267,9 +357,10 @@ practical. This connects our workshop framing to classical fault localization,
 delta debugging, automated program repair, and minimal counterfactual
 explanations \citep{fault_localization,delta_debugging,program_repair,minimal_counterfactuals}.
 
-\section{Current Contribution}
+\section{Artifact Summary}
 
-What is already true in the repository:
+The frozen workshop release now supports the following paper-facing claims and
+artifacts:
 \begin{itemize}
   \item real tau-native replay exists for retail and airline;
   \item the workshop corpora are frozen at $80$ natural and $24$ synthetic
@@ -278,16 +369,17 @@ What is already true in the repository:
   exact replay;
   \item strict non-oracle natural recovery is no longer only synthetic, with
   artifact-backed retail continuation recovery and airline deletion recovery;
-  \item the frozen workshop release now saves $27/80$ strict natural
-  recoveries, $35/80$ oracle-upper-bound recoveries, and a strongest simple
-  retry baseline of $3/80$;
+  \item the workshop artifacts now save $27/80$ strict natural
+  recoveries, $35/80$ oracle-upper-bound recoveries, and retry baselines of
+  $15/80$ from scratch, $7/80$ from a localized snapshot, and $3/80$ for raw
+  continuation;
   \item workshop-specific retry baselines and artifact bundling are implemented
   in the experiment harness;
   \item the workshop artifact path now includes saved oracle autopsies, paper
   tables, figure CSVs, and a curated three-case workshop panel.
 \end{itemize}
 
-What still separates the workshop version from a full conference paper:
+The most important gaps to a full conference version are still:
 \begin{itemize}
   \item hosted retry baselines at a scale beyond free-tier request caps,
   \item stronger non-oracle continuation at scale,
